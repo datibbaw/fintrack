@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Result};
 use clap::{Parser, Subcommand};
 use comfy_table::Table;
+use std::io::{self, BufRead, Write};
 
 mod categorize;
 mod db;
@@ -55,6 +56,10 @@ enum Commands {
     /// Manage categorization rules (regex-based)
     #[command(subcommand)]
     Rule(RuleCmd),
+
+    /// Manage transactions
+    #[command(subcommand)]
+    Transaction(TransactionCmd),
 
     /// Re-apply all rules to every transaction
     Categorize,
@@ -133,6 +138,15 @@ enum RuleCmd {
     },
     /// Remove a rule by its ID
     Remove { id: i64 },
+}
+
+#[derive(Subcommand)]
+enum TransactionCmd {
+    /// Delete all transactions for an account
+    Purge {
+        /// Account name or number
+        account: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -297,6 +311,33 @@ fn main() -> Result<()> {
             RuleCmd::Remove { id } => {
                 db::remove_rule(&conn, id)?;
                 println!("Removed rule #{id}.");
+            }
+        },
+
+        // ── Transactions ──────────────────────────────────────────────────────
+        Commands::Transaction(cmd) => match cmd {
+            TransactionCmd::Purge { account } => {
+                let acc = db::find_account(&conn, &account)?
+                    .ok_or_else(|| anyhow!("Account not found: '{account}'"))?;
+                let count = db::count_transactions_for_account(&conn, acc.id)?;
+                if count == 0 {
+                    println!("No transactions found for account '{}' ({}).", acc.name, acc.number);
+                } else {
+                    println!(
+                        "This will permanently delete {count} transaction(s) for account '{}' ({}).",
+                        acc.name, acc.number
+                    );
+                    print!("Confirm? [y/N] ");
+                    io::stdout().flush()?;
+                    let mut line = String::new();
+                    io::stdin().lock().read_line(&mut line)?;
+                    if line.trim().eq_ignore_ascii_case("y") {
+                        let deleted = db::delete_transactions_for_account(&conn, acc.id)?;
+                        println!("Deleted {deleted} transaction(s).");
+                    } else {
+                        println!("Aborted.");
+                    }
+                }
             }
         },
 

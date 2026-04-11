@@ -200,6 +200,25 @@ pub fn remove_rule(conn: &Connection, id: i64) -> Result<()> {
     Ok(())
 }
 
+// ── Transactions ──────────────────────────────────────────────────────────────
+
+pub fn count_transactions_for_account(conn: &Connection, account_id: i64) -> Result<i64> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM transactions WHERE account_id = ?1",
+        params![account_id],
+        |row| row.get(0),
+    )?;
+    Ok(count)
+}
+
+pub fn delete_transactions_for_account(conn: &Connection, account_id: i64) -> Result<usize> {
+    let n = conn.execute(
+        "DELETE FROM transactions WHERE account_id = ?1",
+        params![account_id],
+    )?;
+    Ok(n)
+}
+
 pub fn all_rules(conn: &Connection) -> Result<Vec<Rule>> {
     let mut stmt = conn.prepare(
         "SELECT id, category_id, field, pattern, priority \
