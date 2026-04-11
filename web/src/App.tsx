@@ -27,11 +27,12 @@ export function App() {
     <div class="app">
       <header class="header">
         <div class="header-brand">
-          <svg class="logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/>
-            <path d="M12 6v6l4 2"/>
+          <svg class="logo" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="9" stroke="var(--text)"/>
+            <path d="M12 5v14" stroke="var(--credit)"/>
+            <path d="M15.5 7.5H10.5a2.2 2.5 0 0 0 0 5h3a2.2 2.5 0 0 1 0 5H8.5" stroke="var(--credit)"/>
           </svg>
-          <span class="brand-name">fintrack</span>
+          <span class="brand-name">Tiny Financial Tracker</span>
         </div>
         <nav class="tab-nav">
           <button
