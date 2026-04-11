@@ -58,6 +58,41 @@ fn migrate(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+// ── Query helpers ─────────────────────────────────────────────────────────────
+
+/// Build a WHERE clause fragment and bind values for date + account filters.
+pub fn build_filters(
+    from: Option<&str>,
+    to: Option<&str>,
+    account: Option<&str>,
+) -> (String, Vec<String>) {
+    let mut clauses = Vec::new();
+    let mut vals: Vec<String> = Vec::new();
+
+    if let Some(f) = from {
+        clauses.push("t.date >= ?".to_string());
+        vals.push(f.to_string());
+    }
+    if let Some(t) = to {
+        clauses.push("t.date <= ?".to_string());
+        vals.push(t.to_string());
+    }
+    if let Some(acc) = account {
+        if !acc.is_empty() {
+            clauses.push("(a.number = ? OR a.name = ?)".to_string());
+            vals.push(acc.to_string());
+            vals.push(acc.to_string());
+        }
+    }
+
+    let clause = if clauses.is_empty() {
+        String::new()
+    } else {
+        format!(" AND {}", clauses.join(" AND "))
+    };
+    (clause, vals)
+}
+
 // ── Accounts ─────────────────────────────────────────────────────────────────
 
 pub fn add_account(conn: &Connection, name: &str, number: &str, bank: &str, currency: &str) -> Result<i64> {
