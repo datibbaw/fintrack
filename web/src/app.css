@@ -367,11 +367,27 @@ body {
 }
 
 .col-ref {
-  max-width: 160px;
+  max-width: 200px;
+  font-size: .8rem;
+}
+
+.ref-line {
+  display: flex;
+  gap: .4rem;
+  line-height: 1.6;
+}
+
+.ref-label {
+  font-family: var(--font-mono);
+  color: var(--text);
+  flex-shrink: 0;
+}
+
+.ref-value {
+  color: var(--text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: .8rem;
 }
 
 .col-account {

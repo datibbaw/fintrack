@@ -169,13 +169,28 @@ export function Transactions({ categories }: Props) {
 }
 
 function TxRow({ tx }: { tx: Transaction }) {
-  const ref = [tx.ref1, tx.ref2, tx.ref3].filter(Boolean).join(' · ')
+  const refFields: [string, string][] = [
+    ['code', tx.code],
+    ['ref1', tx.ref1],
+    ['ref2', tx.ref2],
+    ['ref3', tx.ref3],
+  ].filter(([, v]) => !!v) as [string, string][]
 
   return (
     <tr>
       <td class="col-date mono">{tx.date}</td>
       <td class="col-desc" title={tx.description}>{tx.description || tx.code}</td>
-      <td class="col-ref text-muted" title={ref}>{ref || '–'}</td>
+      <td class="col-ref">
+        {refFields.length === 0
+          ? <span class="text-muted">–</span>
+          : refFields.map(([label, value]) => (
+            <div key={label} class="ref-line">
+              <span class="ref-label">{label}</span>
+              <span class="ref-value">{value}</span>
+            </div>
+          ))
+        }
+      </td>
       <td class="col-category">
         {tx.category
           ? <span class="category-badge">{tx.category}</span>
