@@ -2,38 +2,9 @@ use anyhow::Result;
 use comfy_table::{presets::UTF8_FULL, Table};
 use rusqlite::Connection;
 
+use crate::db;
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-/// Build WHERE clause fragments and matching bind values for date + account filters.
-fn build_filters(
-    from: Option<&str>,
-    to: Option<&str>,
-    account: Option<&str>,
-) -> (String, Vec<String>) {
-    let mut clauses = Vec::new();
-    let mut vals: Vec<String> = Vec::new();
-
-    if let Some(f) = from {
-        clauses.push("t.date >= ?".to_string());
-        vals.push(f.to_string());
-    }
-    if let Some(t) = to {
-        clauses.push("t.date <= ?".to_string());
-        vals.push(t.to_string());
-    }
-    if let Some(acc) = account {
-        clauses.push("(a.number = ? OR a.name = ?)".to_string());
-        vals.push(acc.to_string());
-        vals.push(acc.to_string());
-    }
-
-    let clause = if clauses.is_empty() {
-        String::new()
-    } else {
-        format!(" AND {}", clauses.join(" AND "))
-    };
-    (clause, vals)
-}
 
 fn period_label(from: Option<&str>, to: Option<&str>) -> String {
     match (from, to) {
@@ -52,7 +23,7 @@ pub fn summary(
     to: Option<&str>,
     account: Option<&str>,
 ) -> Result<()> {
-    let (filter_clause, vals) = build_filters(from, to, account);
+    let (filter_clause, vals) = db::build_filters(from, to, account);
 
     let sql = format!(
         "SELECT \
@@ -125,7 +96,7 @@ pub fn transactions(
     account: Option<&str>,
     uncategorized: bool,
 ) -> Result<()> {
-    let (mut filter_clause, mut vals) = build_filters(from, to, account);
+    let (mut filter_clause, mut vals) = db::build_filters(from, to, account);
 
     if uncategorized {
         filter_clause.push_str(" AND t.category_id IS NULL");

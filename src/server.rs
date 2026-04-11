@@ -11,7 +11,7 @@ use axum::{
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
 
-use crate::db;
+use crate::{db, models::Account};
 
 // ── Embedded web assets ───────────────────────────────────────────────────────
 
@@ -40,15 +40,6 @@ impl<E: Into<anyhow::Error>> From<E> for ApiError {
 }
 
 // ── Response types ────────────────────────────────────────────────────────────
-
-#[derive(Serialize)]
-pub struct AccountDto {
-    pub id: i64,
-    pub name: String,
-    pub number: String,
-    pub bank: String,
-    pub currency: String,
-}
 
 #[derive(Serialize)]
 pub struct CategoryDto {
@@ -128,43 +119,11 @@ fn default_limit() -> i64 { 100 }
 
 // ── DB helpers ────────────────────────────────────────────────────────────────
 
-fn build_filters(
-    from: Option<&str>,
-    to: Option<&str>,
-    account: Option<&str>,
-) -> (String, Vec<String>) {
-    let mut clauses = Vec::new();
-    let mut vals: Vec<String> = Vec::new();
-
-    if let Some(f) = from {
-        clauses.push("t.date >= ?".to_string());
-        vals.push(f.to_string());
-    }
-    if let Some(t) = to {
-        clauses.push("t.date <= ?".to_string());
-        vals.push(t.to_string());
-    }
-    if let Some(acc) = account {
-        if !acc.is_empty() {
-            clauses.push("(a.number = ? OR a.name = ?)".to_string());
-            vals.push(acc.to_string());
-            vals.push(acc.to_string());
-        }
-    }
-
-    let clause = if clauses.is_empty() {
-        String::new()
-    } else {
-        format!(" AND {}", clauses.join(" AND "))
-    };
-    (clause, vals)
-}
-
 fn query_summary(
     conn: &rusqlite::Connection,
     p: &SummaryParams,
 ) -> anyhow::Result<SummaryResponse> {
-    let (filter_clause, vals) = build_filters(
+    let (filter_clause, vals) = db::build_filters(
         p.from.as_deref(),
         p.to.as_deref(),
         p.account.as_deref(),
@@ -234,7 +193,7 @@ fn query_transactions(
     conn: &rusqlite::Connection,
     p: &TransactionsParams,
 ) -> anyhow::Result<TransactionsResponse> {
-    let (mut filter_clause, mut vals) = build_filters(
+    let (mut filter_clause, mut vals) = db::build_filters(
         p.from.as_deref(),
         p.to.as_deref(),
         p.account.as_deref(),
@@ -309,21 +268,11 @@ fn query_transactions(
 
 // ── API handlers ──────────────────────────────────────────────────────────────
 
-async fn api_accounts(State(db): State<Db>) -> Result<Json<Vec<AccountDto>>, ApiError> {
+async fn api_accounts(State(db): State<Db>) -> Result<Json<Vec<Account>>, ApiError> {
     let db = Arc::clone(&db);
     let result = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
         let conn = db.lock().map_err(|_| anyhow!("db lock poisoned"))?;
-        let accounts = db::list_accounts(&conn)?
-            .into_iter()
-            .map(|a| AccountDto {
-                id: a.id,
-                name: a.name,
-                number: a.number,
-                bank: a.bank,
-                currency: a.currency,
-            })
-            .collect();
-        Ok(accounts)
+        db::list_accounts(&conn)
     })
     .await
     .map_err(|e| anyhow!("thread error: {e}"))??;

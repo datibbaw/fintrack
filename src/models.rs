@@ -1,5 +1,5 @@
 /// A bank account tracked in the system.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct Account {
     pub id: i64,
     pub name: String,
