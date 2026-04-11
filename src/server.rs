@@ -185,7 +185,7 @@ fn query_summary(
          JOIN  accounts a ON t.account_id = a.id \
          WHERE 1=1{filter_clause} \
          GROUP BY c.id \
-         ORDER BY total_debit DESC"
+         ORDER BY ABS(total_credit - total_debit) DESC"
     );
 
     let mut stmt = conn.prepare(&sql)?;
