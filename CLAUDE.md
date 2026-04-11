@@ -18,6 +18,18 @@ cargo install --path .
 
 The `build.rs` script tells Cargo to recompile whenever `web/dist/` changes, so the two-step above is all that's needed.
 
+### All-in-one binary (for use outside development)
+
+To produce a self-contained binary with all web assets baked in (no separate `web/` directory needed at runtime):
+
+```bash
+cd web && npm run build   # compile frontend → web/dist/
+cd ..
+cargo install --path .    # embeds web/dist/ and installs to ~/.cargo/bin/fintrack
+```
+
+The resulting `~/.cargo/bin/fintrack` binary includes the full web UI via `rust-embed` and has no runtime dependencies beyond the SQLite database file (`~/.fintrack.db`). It can be copied to any machine with a compatible OS/architecture and run directly.
+
 ## Project layout
 
 ```
