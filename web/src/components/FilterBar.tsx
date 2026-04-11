@@ -70,9 +70,11 @@ export function FilterBar({ accounts }: Props) {
         <select
           class="filter-input"
           value={filterAccount.value}
-          onChange={e => { filterAccount.value = (e.target as HTMLSelectElement).value }}
+          onChange={e => {
+            filterAccount.value = (e.target as HTMLSelectElement).value
+            localStorage.setItem('fintrack.account', filterAccount.value)
+          }}
         >
-          <option value="">All accounts</option>
           {accounts.map(a => (
             <option key={a.id} value={a.name}>{a.name}</option>
           ))}

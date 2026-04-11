@@ -11,7 +11,7 @@ function today(): string {
 
 export const filterFrom    = signal(startOfMonth())
 export const filterTo      = signal(today())
-export const filterAccount = signal('')
+export const filterAccount = signal(localStorage.getItem('fintrack.account') ?? '')
 
 export type Tab = 'summary' | 'transactions'
 export const activeTab      = signal<Tab>('summary')

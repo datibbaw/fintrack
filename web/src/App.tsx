@@ -2,7 +2,7 @@ import { useSignal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import { api } from './api'
 import type { Account, Category } from './types'
-import { activeTab } from './store'
+import { activeTab, filterAccount } from './store'
 import { FilterBar } from './components/FilterBar'
 import { Summary } from './components/Summary'
 import { Transactions } from './components/Transactions'
@@ -14,7 +14,12 @@ export function App() {
   const categories = useSignal<Category[]>([])
 
   useEffect(() => {
-    api.accounts().then(a => { accounts.value = a })
+    api.accounts().then(a => {
+      accounts.value = a
+      if (localStorage.getItem('fintrack.account') === null && a.length > 0) {
+        filterAccount.value = a[0].name
+      }
+    })
     api.categories().then(c => { categories.value = c })
   }, [])
 
