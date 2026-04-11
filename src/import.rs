@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use chrono::NaiveDate;
 use rusqlite::{params, Connection};
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::fs;
 
 use crate::db;
@@ -11,6 +12,85 @@ pub struct ImportResult {
     pub account_number: String,
     pub imported: usize,
     pub skipped: usize,
+}
+
+// ── Column map ────────────────────────────────────────────────────────────────
+
+/// Resolved indices into a CSV row for the fields we care about.
+struct ColumnMap {
+    date: usize,
+    code: usize,
+    description: usize,
+    ref1: usize,
+    ref2: usize,
+    ref3: usize,
+    status: usize,
+    debit: usize,
+    credit: usize,
+}
+
+/// Each format is a list of (field, expected_header_label) pairs.
+/// Only the fields we need are listed; extra columns are ignored.
+const KNOWN_FORMATS: &[&[(&str, &str)]] = &[
+    // Format A — 9-column export ("Transaction Code", "Transaction Ref*")
+    &[
+        ("date",        "Transaction Date"),
+        ("code",        "Transaction Code"),
+        ("description", "Description"),
+        ("ref1",        "Transaction Ref1"),
+        ("ref2",        "Transaction Ref2"),
+        ("ref3",        "Transaction Ref3"),
+        ("status",      "Status"),
+        ("debit",       "Debit Amount"),
+        ("credit",      "Credit Amount"),
+    ],
+    // Format B — 12-column export ("Statement Code", "Supplementary Code", etc.)
+    &[
+        ("date",        "Transaction Date"),
+        ("code",        "Statement Code"),
+        ("description", "Description"),
+        ("ref1",        "Supplementary Code"),
+        ("ref2",        "Supplementary Code Description"),
+        ("ref3",        "Client Reference"),
+        ("status",      "Status"),
+        ("debit",       "Debit Amount"),
+        ("credit",      "Credit Amount"),
+    ],
+];
+
+fn resolve_column_map(headers: &[&str]) -> Option<ColumnMap> {
+    let index: HashMap<&str, usize> = headers
+        .iter()
+        .enumerate()
+        .map(|(i, h)| (*h, i))
+        .collect();
+
+    for format in KNOWN_FORMATS {
+        let mut m: HashMap<&str, usize> = HashMap::new();
+        let matched = format.iter().all(|(field, label)| {
+            if let Some(&i) = index.get(label) {
+                m.insert(field, i);
+                true
+            } else {
+                false
+            }
+        });
+
+        if matched {
+            return Some(ColumnMap {
+                date:        m["date"],
+                code:        m["code"],
+                description: m["description"],
+                ref1:        m["ref1"],
+                ref2:        m["ref2"],
+                ref3:        m["ref3"],
+                status:      m["status"],
+                debit:       m["debit"],
+                credit:      m["credit"],
+            });
+        }
+    }
+    None
 }
 
 // ── DBS CSV parsing ───────────────────────────────────────────────────────────
@@ -25,13 +105,13 @@ fn parse_dbs_csv(content: &str) -> Result<(String, String, Vec<[String; 9]>)> {
 
     let mut account_name = String::new();
     let mut account_number = String::new();
-    let mut in_data = false;
+    let mut col_map: Option<ColumnMap> = None;
     let mut rows: Vec<[String; 9]> = Vec::new();
 
     for result in rdr.records() {
         let record = result?;
 
-        if !in_data {
+        if col_map.is_none() {
             let first = record.get(0).map(|s| s.trim()).unwrap_or("");
 
             // "Account Details For:" row carries the account name + number
@@ -48,32 +128,45 @@ fn parse_dbs_csv(content: &str) -> Result<(String, String, Vec<[String; 9]>)> {
                 }
             }
 
-            // Column header row signals the start of transaction data
+            // Column header row: resolve which format this file uses
             if first == "Transaction Date" {
-                in_data = true;
+                let headers: Vec<&str> = record.iter().map(|s| s.trim()).collect();
+                col_map = Some(
+                    resolve_column_map(&headers).ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "Unrecognised CSV column layout. Headers found: {:?}",
+                            headers
+                        )
+                    })?,
+                );
             }
             continue;
         }
 
-        if record.len() < 9 {
-            continue;
-        }
-        let date = record[0].trim().to_string();
+        let cm = col_map.as_ref().unwrap();
+
+        let date = record.get(cm.date).map(|s| s.trim()).unwrap_or("").to_string();
         if date.is_empty() {
             continue;
         }
 
+        let get = |idx: usize| record.get(idx).map(|s| s.trim().to_string()).unwrap_or_default();
+
         rows.push([
             date,
-            record[1].trim().to_string(), // code
-            record[2].trim().to_string(), // description
-            record[3].trim().to_string(), // ref1
-            record[4].trim().to_string(), // ref2
-            record[5].trim().to_string(), // ref3
-            record[6].trim().to_string(), // status
-            record[7].trim().to_string(), // debit amount (may be empty)
-            record[8].trim().to_string(), // credit amount (may be empty)
+            get(cm.code),
+            get(cm.description),
+            get(cm.ref1),
+            get(cm.ref2),
+            get(cm.ref3),
+            get(cm.status),
+            get(cm.debit),
+            get(cm.credit),
         ]);
+    }
+
+    if col_map.is_none() {
+        anyhow::bail!("No transaction header row found in CSV");
     }
 
     Ok((account_name, account_number, rows))
