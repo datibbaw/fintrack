@@ -284,6 +284,9 @@ body {
   opacity: .75;
 }
 
+.bar-fill.positive { background: var(--credit); }
+.bar-fill.negative { background: var(--debit); }
+
 /* ── Summary ───────────────────────────────────────────────────────────────── */
 
 .summary { display: flex; flex-direction: column; gap: 1.25rem; }

@@ -49,7 +49,7 @@ export function Summary(_props: Props) {
     return <div class="state-message">No transactions found for this period.</div>
   }
 
-  const maxDebit = Math.max(...d.rows.map(r => r.debit), 0.01)
+  const maxAbsNet = Math.max(...d.rows.map(r => Math.abs(r.net)), 0.01)
 
   return (
     <div class="summary">
@@ -82,7 +82,7 @@ export function Summary(_props: Props) {
           </thead>
           <tbody>
             {d.rows.map(row => (
-              <SummaryRowEl key={row.category} row={row} maxDebit={maxDebit} />
+              <SummaryRowEl key={row.category} row={row} maxAbsNet={maxAbsNet} />
             ))}
           </tbody>
         </table>
@@ -91,8 +91,9 @@ export function Summary(_props: Props) {
   )
 }
 
-function SummaryRowEl({ row, maxDebit }: { row: SummaryRow; maxDebit: number }) {
-  const barPct = maxDebit > 0 ? (row.debit / maxDebit) * 100 : 0
+function SummaryRowEl({ row, maxAbsNet }: { row: SummaryRow; maxAbsNet: number }) {
+  const barPct = maxAbsNet > 0 ? (Math.abs(row.net) / maxAbsNet) * 100 : 0
+  const barClass = row.net > 0 ? 'bar-fill positive' : row.net < 0 ? 'bar-fill negative' : 'bar-fill'
 
   return (
     <tr>
@@ -114,7 +115,7 @@ function SummaryRowEl({ row, maxDebit }: { row: SummaryRow; maxDebit: number }) 
       <td class="col-count mono">{row.count}</td>
       <td class="col-bar">
         <div class="bar-track">
-          <div class="bar-fill" style={{ width: `${barPct}%` }} />
+          <div class={barClass} style={{ width: `${barPct}%` }} />
         </div>
       </td>
     </tr>
