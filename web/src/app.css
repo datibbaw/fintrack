@@ -604,6 +604,124 @@ body {
   color: var(--accent);
 }
 
+/* ── Rules panel ───────────────────────────────────────────────────────────── */
+
+.cat-rules-btn {
+  flex-shrink: 0;
+  padding: .15rem .55rem;
+  border-radius: 999px;
+  font-size: .72rem;
+  font-weight: 600;
+  letter-spacing: .02em;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: opacity .15s, background .15s;
+}
+
+.cat-rules-btn-has {
+  background: color-mix(in srgb, var(--credit) 15%, transparent);
+  color: var(--credit);
+  border-color: color-mix(in srgb, var(--credit) 35%, transparent);
+}
+
+.cat-rules-btn-has:hover,
+.cat-rules-btn-has.cat-rules-btn-open {
+  background: color-mix(in srgb, var(--credit) 25%, transparent);
+}
+
+.cat-rules-btn-none {
+  background: transparent;
+  color: var(--text-muted);
+  border-color: var(--border);
+}
+
+.cat-rules-btn-none:hover {
+  background: var(--row-hover);
+}
+
+.cat-rules-panel-row > td {
+  padding: 0 .5rem .5rem 2.5rem;
+  background: var(--surface);
+}
+
+.cat-rules-panel {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: .5rem .75rem;
+  background: var(--bg);
+}
+
+.cat-rules-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: .4rem;
+}
+
+.cat-rules-title {
+  font-size: .7rem;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.cat-rules-state {
+  font-size: .85rem;
+  color: var(--text-muted);
+  margin: .25rem 0;
+}
+
+.cat-rules-table {
+  margin-top: .25rem;
+  font-size: .82rem;
+}
+
+.cat-rules-table th,
+.cat-rules-table td {
+  padding: .2rem .5rem;
+}
+
+/* ── Regex syntax highlighting ─────────────────────────────────────────────── */
+
+.regex-hl {
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: .82rem;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* anchors: ^ $ \b \B \A \z \Z */
+.regex-hl .token.anchor        { color: #e06c75; font-weight: 600; }
+/* alternation: | */
+.regex-hl .token.alternation   { color: #c678dd; font-weight: 600; }
+/* groups: (...) (?:...) (?=...) etc */
+.regex-hl .token.group         { color: #61afef; }
+/* char sets: \d \w \s \D etc */
+.regex-hl .token.char-set      { color: #56b6c2; }
+/* char classes: [...] */
+.regex-hl .token.char-class    { color: #e5c07b; }
+/* quantifiers: * + ? {n,m} */
+.regex-hl .token.quantifier    { color: #d19a66; font-weight: 600; }
+/* escapes: \. \( \) etc */
+.regex-hl .token.escape        { color: #98c379; }
+/* special escapes: \n \t \r */
+.regex-hl .token.special-escape { color: #98c379; }
+/* backreferences: \1 \k<name> */
+.regex-hl .token.backreference { color: #c678dd; }
+
+@media (prefers-color-scheme: light) {
+  .regex-hl .token.anchor        { color: #c0392b; }
+  .regex-hl .token.alternation   { color: #8e44ad; }
+  .regex-hl .token.group         { color: #2471a3; }
+  .regex-hl .token.char-set      { color: #148f77; }
+  .regex-hl .token.char-class    { color: #b7770d; }
+  .regex-hl .token.quantifier    { color: #ca6f1e; }
+  .regex-hl .token.escape        { color: #1e8449; }
+  .regex-hl .token.special-escape { color: #1e8449; }
+  .regex-hl .token.backreference { color: #8e44ad; }
+}
+
 /* ── Responsive ────────────────────────────────────────────────────────────── */
 
 @media (max-width: 640px) {
