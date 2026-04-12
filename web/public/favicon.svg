@@ -1,0 +1,11 @@
+<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    :root { --ring: #1a1d23; --dollar: #16a34a; }
+    @media (prefers-color-scheme: dark) {
+      :root { --ring: #e8eaf0; --dollar: #4ade80; }
+    }
+  </style>
+  <circle cx="12" cy="12" r="9" stroke="var(--ring)"/>
+  <path d="M12 5v14" stroke="var(--dollar)"/>
+  <path d="M15.5 7.5H10.5a2.2 2.5 0 0 0 0 5h3a2.2 2.5 0 0 1 0 5H8.5" stroke="var(--dollar)"/>
+</svg>
