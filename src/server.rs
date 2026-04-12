@@ -2,10 +2,10 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::anyhow;
 use axum::{
-    extract::{Query, State},
+    extract::{Path, Query, State},
     http::{header, StatusCode, Uri},
     response::{IntoResponse, Response},
-    routing::get,
+    routing::{get, put},
     Json, Router,
 };
 use rust_embed::RustEmbed;
@@ -91,6 +91,20 @@ pub struct TransactionDto {
 pub struct TransactionsResponse {
     pub rows: Vec<TransactionDto>,
     pub total: usize,
+}
+
+// ── Request bodies ────────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct CreateCategoryBody {
+    pub name: String,
+    pub parent_id: Option<i64>,
+}
+
+#[derive(Deserialize)]
+pub struct UpdateCategoryBody {
+    pub name: String,
+    pub parent_id: Option<i64>,
 }
 
 // ── Query params ──────────────────────────────────────────────────────────────
@@ -305,6 +319,56 @@ async fn api_categories(State(db): State<Db>) -> Result<Json<Vec<CategoryDto>>, 
     Ok(Json(result))
 }
 
+async fn api_create_category(
+    State(db): State<Db>,
+    Json(body): Json<CreateCategoryBody>,
+) -> Result<Json<CategoryDto>, ApiError> {
+    let db = Arc::clone(&db);
+    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
+        let conn = db.lock().map_err(|_| anyhow!("db lock poisoned"))?;
+        let id = db::add_category(&conn, &body.name, body.parent_id)?;
+        let cats = db::list_categories(&conn)?;
+        let cat = cats.iter().find(|c| c.id == id)
+            .ok_or_else(|| anyhow!("category not found after insert"))?;
+        let parent = cat.parent_id
+            .and_then(|pid| cats.iter().find(|p| p.id == pid))
+            .map(|p| p.name.clone());
+        Ok(CategoryDto { id: cat.id, name: cat.name.clone(), parent_id: cat.parent_id, parent })
+    })
+    .await
+    .map_err(|e| anyhow!("thread error: {e}"))??;
+    Ok(Json(result))
+}
+
+async fn api_update_category(
+    State(db): State<Db>,
+    Path(id): Path<i64>,
+    Json(body): Json<UpdateCategoryBody>,
+) -> Result<StatusCode, ApiError> {
+    let db = Arc::clone(&db);
+    tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
+        let conn = db.lock().map_err(|_| anyhow!("db lock poisoned"))?;
+        db::update_category(&conn, id, &body.name, body.parent_id)
+    })
+    .await
+    .map_err(|e| anyhow!("thread error: {e}"))??;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn api_delete_category(
+    State(db): State<Db>,
+    Path(id): Path<i64>,
+) -> Result<StatusCode, ApiError> {
+    let db = Arc::clone(&db);
+    tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
+        let conn = db.lock().map_err(|_| anyhow!("db lock poisoned"))?;
+        db::remove_category(&conn, id)
+    })
+    .await
+    .map_err(|e| anyhow!("thread error: {e}"))??;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 async fn api_summary(
     State(db): State<Db>,
     Query(params): Query<SummaryParams>,
@@ -368,7 +432,8 @@ pub async fn serve(db_path: &str, port: u16, open: bool) -> anyhow::Result<()> {
 
     let api = Router::new()
         .route("/accounts", get(api_accounts))
-        .route("/categories", get(api_categories))
+        .route("/categories", get(api_categories).post(api_create_category))
+        .route("/categories/:id", put(api_update_category).delete(api_delete_category))
         .route("/summary", get(api_summary))
         .route("/transactions", get(api_transactions));
 

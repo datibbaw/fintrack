@@ -178,6 +178,14 @@ pub fn find_category(conn: &Connection, name: &str) -> Result<Option<Category>> 
     })
 }
 
+pub fn update_category(conn: &Connection, id: i64, name: &str, parent_id: Option<i64>) -> Result<()> {
+    conn.execute(
+        "UPDATE categories SET name = ?1, parent_id = ?2 WHERE id = ?3",
+        params![name, parent_id, id],
+    )?;
+    Ok(())
+}
+
 pub fn remove_category(conn: &Connection, id: i64) -> Result<()> {
     conn.execute("DELETE FROM categories WHERE id = ?1", params![id])?;
     Ok(())

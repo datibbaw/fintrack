@@ -12,6 +12,25 @@ async function get<T>(path: string, params?: Record<string, string>): Promise<T>
   return res.json()
 }
 
+async function send(method: string, path: string, body?: unknown): Promise<void> {
+  const res = await fetch(path, {
+    method,
+    headers: body !== undefined ? { 'Content-Type': 'application/json' } : {},
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  })
+  if (!res.ok) throw new Error(`API error ${res.status}: ${await res.text()}`)
+}
+
+async function post<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) throw new Error(`API error ${res.status}: ${await res.text()}`)
+  return res.json()
+}
+
 export const api = {
   accounts(): Promise<Account[]> {
     return get('/api/accounts')
@@ -19,6 +38,18 @@ export const api = {
 
   categories(): Promise<Category[]> {
     return get('/api/categories')
+  },
+
+  createCategory(name: string, parentId: number | null): Promise<Category> {
+    return post('/api/categories', { name, parent_id: parentId })
+  },
+
+  updateCategory(id: number, name: string, parentId: number | null): Promise<void> {
+    return send('PUT', `/api/categories/${id}`, { name, parent_id: parentId })
+  },
+
+  deleteCategory(id: number): Promise<void> {
+    return send('DELETE', `/api/categories/${id}`)
   },
 
   summary(params: {
