@@ -169,6 +169,18 @@ body {
   height: 34px;
 }
 
+input[type="date"]::-webkit-calendar-picker-indicator {
+  opacity: 0.55; /* light: black icon → ~--text-muted (#6b7280) on white surface */
+  cursor: pointer;
+}
+
+@media (prefers-color-scheme: dark) {
+  input[type="date"]::-webkit-calendar-picker-indicator {
+    filter: invert(1) opacity(0.52); /* dark: white icon → ~--text-muted (#8892a4) on dark surface */
+    opacity: 1;
+  }
+}
+
 .filter-input:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
