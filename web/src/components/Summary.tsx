@@ -1,4 +1,5 @@
 import { signal, effect } from '@preact/signals'
+import { Fragment } from 'preact'
 import type { Category, SummaryResponse, SummaryRow } from '../types'
 import { filterFrom, filterTo, filterAccount, drillIntoCategory } from '../store'
 import { api } from '../api'
@@ -7,7 +8,7 @@ interface Props {
   categories: Category[]
 }
 
-const data   = signal<SummaryResponse | null>(null)
+const data    = signal<SummaryResponse | null>(null)
 const loading = signal(false)
 const error   = signal<string | null>(null)
 
@@ -49,6 +50,22 @@ export function Summary(_props: Props) {
     return <div class="state-message">No transactions found for this period.</div>
   }
 
+  // Identify which category_ids appear as a parent_id of some row — these are rollup rows.
+  const parentIds = new Set(
+    d.rows.filter(r => r.parent_id !== null).map(r => r.parent_id!)
+  )
+
+  // Separate top-level rows (no parent), children, and uncategorised.
+  const uncategorized = d.rows.find(r => r.category === 'Uncategorized') ?? null
+  const topLevel = d.rows
+    .filter(r => r.parent_id === null && r.category !== 'Uncategorized')
+    .sort((a, b) => Math.abs(b.net) - Math.abs(a.net))
+
+  const childrenOf = (parentId: number) =>
+    d.rows
+      .filter(r => r.parent_id === parentId)
+      .sort((a, b) => Math.abs(b.net) - Math.abs(a.net))
+
   const maxAbsNet = Math.max(...d.rows.map(r => Math.abs(r.net)), 0.01)
 
   return (
@@ -81,9 +98,22 @@ export function Summary(_props: Props) {
             </tr>
           </thead>
           <tbody>
-            {d.rows.map(row => (
-              <SummaryRowEl key={row.category} row={row} maxAbsNet={maxAbsNet} />
-            ))}
+            {topLevel.map(row => {
+              const isRollup = parentIds.has(row.category_id!)
+              const children = isRollup ? childrenOf(row.category_id!) : []
+              return (
+                <Fragment key={row.category_id ?? row.category}>
+                  <SummaryRowEl row={row} maxAbsNet={maxAbsNet} isRollup={isRollup} />
+                  {children.map(child => (
+                    <SummaryRowEl key={child.category_id ?? child.category}
+                      row={child} maxAbsNet={maxAbsNet} isChild />
+                  ))}
+                </Fragment>
+              )
+            })}
+            {uncategorized && (
+              <SummaryRowEl row={uncategorized} maxAbsNet={maxAbsNet} />
+            )}
           </tbody>
         </table>
       </div>
@@ -91,14 +121,25 @@ export function Summary(_props: Props) {
   )
 }
 
-function SummaryRowEl({ row, maxAbsNet }: { row: SummaryRow; maxAbsNet: number }) {
-  const barPct = maxAbsNet > 0 ? (Math.abs(row.net) / maxAbsNet) * 100 : 0
+function SummaryRowEl({
+  row,
+  maxAbsNet,
+  isRollup = false,
+  isChild = false,
+}: {
+  row: SummaryRow
+  maxAbsNet: number
+  isRollup?: boolean
+  isChild?: boolean
+}) {
+  const barPct   = maxAbsNet > 0 ? (Math.abs(row.net) / maxAbsNet) * 100 : 0
   const barClass = row.net > 0 ? 'bar-fill positive' : row.net < 0 ? 'bar-fill negative' : 'bar-fill'
+  const rowClass = isRollup ? 'summary-row-rollup' : isChild ? 'summary-row-child' : ''
 
   return (
-    <tr>
+    <tr class={rowClass}>
       <td class="col-category">
-        {row.parent && <span class="parent-badge">{row.parent} /</span>}
+        {isChild && <span class="child-indent" aria-hidden="true">└</span>}
         <span
           class={`category-link ${row.category === 'Uncategorized' ? 'text-muted' : ''}`}
           onClick={() => drillIntoCategory(row.category, row.category_id)}

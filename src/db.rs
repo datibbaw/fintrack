@@ -279,19 +279,28 @@ pub fn delete_transactions_for_account(conn: &Connection, account_id: i64) -> Re
     Ok(n)
 }
 
-pub fn all_rules(conn: &Connection) -> Result<Vec<Rule>> {
+/// Returns all rules, joined with their category to expose whether each rule belongs
+/// to a sub-category.
+/// Used by the categorisation engine to break priority ties in favour of more specific rules.
+pub fn all_rules_with_depth(conn: &Connection) -> Result<Vec<(Rule, bool)>> {
     let mut stmt = conn.prepare(
-        "SELECT id, category_id, field, pattern, priority \
-         FROM rules ORDER BY priority DESC, id"
+        "SELECT r.id, r.category_id, r.field, r.pattern, r.priority, \
+                c.parent_id IS NOT NULL AS is_sub \
+         FROM rules r \
+         JOIN categories c ON r.category_id = c.id \
+         ORDER BY r.priority DESC, r.id"
     )?;
     let rows = stmt.query_map([], |row| {
-        Ok(Rule {
-            id: row.get(0)?,
-            category_id: row.get(1)?,
-            field: row.get(2)?,
-            pattern: row.get(3)?,
-            priority: row.get(4)?,
-        })
+        Ok((
+            Rule {
+                id: row.get(0)?,
+                category_id: row.get(1)?,
+                field: row.get(2)?,
+                pattern: row.get(3)?,
+                priority: row.get(4)?,
+            },
+            row.get::<_, bool>(5)?,
+        ))
     })?.collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
 }

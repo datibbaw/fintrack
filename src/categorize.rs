@@ -9,6 +9,10 @@ struct CompiledRule {
     field: String,
     pattern: Regex,
     priority: i64,
+    /// True when this rule's category is a sub-category (has a parent).
+    /// Used as a secondary sort key so sub-category rules win ties against
+    /// parent catch-all rules at the same explicit priority.
+    is_sub: bool,
 }
 
 fn matches(rule: &CompiledRule, code: &str, desc: &str, ref1: &str, ref2: &str, ref3: &str) -> bool {
@@ -32,17 +36,18 @@ fn matches(rule: &CompiledRule, code: &str, desc: &str, ref1: &str, ref2: &str, 
 /// The highest-priority matching rule wins. Transactions with no match are left
 /// as-is (existing category_id is preserved unless a rule now matches).
 pub fn apply_rules(conn: &Connection) -> Result<usize> {
-    let raw = db::all_rules(conn)?;
+    let raw = db::all_rules_with_depth(conn)?;
 
     let rules: Vec<CompiledRule> = raw
         .into_iter()
-        .filter_map(|r| {
+        .filter_map(|(r, is_sub)| {
             match Regex::new(&r.pattern) {
                 Ok(re) => Some(CompiledRule {
                     category_id: r.category_id,
                     field: r.field,
                     pattern: re,
                     priority: r.priority,
+                    is_sub,
                 }),
                 Err(e) => {
                     eprintln!("Warning: skipping rule #{} — invalid regex '{}': {e}", r.id, r.pattern);
@@ -75,10 +80,12 @@ pub fn apply_rules(conn: &Connection) -> Result<usize> {
     let mut categorized = 0usize;
 
     for tx in &txs {
-        // Pick the highest-priority rule that matches this transaction.
+        // Pick the best matching rule: highest priority wins; sub-category rules
+        // beat parent catch-all rules of equal priority so the more specific
+        // assignment always takes precedence.
         let best = rules.iter()
             .filter(|r| matches(r, &tx.code, &tx.desc, &tx.ref1, &tx.ref2, &tx.ref3))
-            .max_by_key(|r| r.priority);
+            .max_by_key(|r| (r.priority, r.is_sub));
 
         if let Some(rule) = best {
             conn.execute(

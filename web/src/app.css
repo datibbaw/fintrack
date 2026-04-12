@@ -331,6 +331,26 @@ body {
   margin-right: .3rem;
 }
 
+/* Rollup row: parent category that aggregates its children */
+.summary-row-rollup td {
+  font-weight: 600;
+  border-top: 1px solid var(--border);
+}
+
+.summary-row-rollup:first-child td { border-top: none; }
+
+/* Child row: sub-category indented under its rollup parent */
+.summary-row-child td { color: var(--text-muted); }
+
+.summary-row-child .col-category { padding-left: 0; }
+
+.child-indent {
+  display: inline-block;
+  width: 1.4rem;
+  color: var(--border);
+  user-select: none;
+}
+
 .category-link {
   cursor: pointer;
   border-radius: 3px;
