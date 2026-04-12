@@ -32,11 +32,47 @@ effect(() => {
 function reload() { refreshTick.value++ }
 
 // ── Drag guard variables ───────────────────────────────────────────────────────
-// Plain variables (not signals) so that reading/writing them never triggers
-// a re-render during the sensitive dragstart event.
 
-let _dragFromHandle = false   // true only when pointer went down on a grip handle
-let _dragCancelled  = false   // set in onDragEnd to invalidate any pending setTimeout
+let _dragFromHandle = false
+let _dragCancelled  = false
+
+// ── Icons ──────────────────────────────────────────────────────────────────────
+
+function IconEdit() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+      aria-hidden="true">
+      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+    </svg>
+  )
+}
+
+function IconAddSub() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"
+      aria-hidden="true">
+      <rect x="3" y="3" width="18" height="18" rx="2"/>
+      <line x1="12" y1="8" x2="12" y2="16"/>
+      <line x1="8"  y1="12" x2="16" y2="12"/>
+    </svg>
+  )
+}
+
+function IconTrash() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+      aria-hidden="true">
+      <polyline points="3 6 5 6 21 6"/>
+      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+      <line x1="10" y1="11" x2="10" y2="17"/>
+      <line x1="14" y1="11" x2="14" y2="17"/>
+    </svg>
+  )
+}
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
@@ -98,7 +134,11 @@ export function Categories() {
   }
 
   async function remove(cat: Category) {
-    if (!confirm(`Delete "${cat.name}"?\n\nTransactions assigned to it will become uncategorized.`)) return
+    const txCount = cat.transaction_count
+    const txNote  = txCount > 0
+      ? `\n\n⚠ ${txCount} transaction${txCount === 1 ? '' : 's'} assigned to it will become uncategorized.`
+      : ''
+    if (!confirm(`Delete "${cat.name}"?${txNote}`)) return
     saveError.value = null
     try {
       await api.deleteCategory(cat.id)
@@ -116,18 +156,13 @@ export function Categories() {
   // ── Drag & drop ────────────────────────────────────────────────────────────
 
   function onHandlePointerDown() { _dragFromHandle = true }
-  function onHandlePointerUp()   { _dragFromHandle = false }   // cancelled before dragstart
+  function onHandlePointerUp()   { _dragFromHandle = false }
 
   function onDragStart(e: DragEvent, cat: Category) {
-    // Cancel if the drag didn't originate from the grip handle
     if (!_dragFromHandle) { e.preventDefault(); return }
     _dragFromHandle = false
     _dragCancelled  = false
     if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
-
-    // Defer the signal write: setting it synchronously inside dragstart causes Preact
-    // to re-render and insert the drop-zone row, which shifts the dragged element and
-    // makes the browser cancel the operation.  Deferring past the event is safe.
     const id = cat.id
     setTimeout(() => {
       if (!_dragCancelled) draggingId.value = id
@@ -135,7 +170,7 @@ export function Categories() {
   }
 
   function onDragEnd() {
-    _dragCancelled     = true   // invalidate any pending setTimeout
+    _dragCancelled     = true
     draggingId.value   = null
     dropTargetId.value = null
   }
@@ -148,7 +183,6 @@ export function Categories() {
   }
 
   function onDragLeave(e: DragEvent) {
-    // Suppress spurious leaves when moving between child elements of the same row
     const rt = e.relatedTarget as Element | null
     const ct = e.currentTarget as Element
     if (!rt || !ct.contains(rt)) dropTargetId.value = null
@@ -183,15 +217,28 @@ export function Categories() {
   const isIdle      = m.type === 'idle'
   const isAddingTop = m.type === 'add' && m.parentId === null
   const isDragging  = draggingId.value !== null
-
-  const editingId     = m.type === 'edit' ? m.id : null
-  const parentOptions = topLevel.filter(c => c.id !== editingId)
+  const editingId   = m.type === 'edit' ? m.id : null
+  const parentOpts  = topLevel.filter(c => c.id !== editingId)
 
   // ── Render helpers ─────────────────────────────────────────────────────────
 
-  function renderEditFields() {
+  function renderHandle() {
     return (
-      <div class="cat-edit-fields">
+      <span class="cat-drag-handle" title="Drag to reparent"
+        onPointerDown={onHandlePointerDown} onPointerUp={onHandlePointerUp}
+        aria-hidden="true">
+        <svg width="8" height="13" viewBox="0 0 8 13" fill="currentColor">
+          <circle cx="2"  cy="1.5"  r="1.5"/><circle cx="6"  cy="1.5"  r="1.5"/>
+          <circle cx="2"  cy="6.5"  r="1.5"/><circle cx="6"  cy="6.5"  r="1.5"/>
+          <circle cx="2"  cy="11.5" r="1.5"/><circle cx="6"  cy="11.5" r="1.5"/>
+        </svg>
+      </span>
+    )
+  }
+
+  function renderEditRow(parentId?: number | null) {
+    return (
+      <div class="cat-edit-row">
         <input
           class="cat-input filter-input"
           value={inputValue.value}
@@ -199,50 +246,60 @@ export function Categories() {
           onKeyDown={onKey}
           autoFocus
         />
-        <select
-          class="cat-parent-select filter-input"
-          value={selectedParent.value ?? ''}
-          onChange={e => {
-            const v = (e.target as HTMLSelectElement).value
-            selectedParent.value = v === '' ? null : Number(v)
-          }}
-        >
-          <option value="">None (top-level)</option>
-          {parentOptions.map(p => (
-            <option key={p.id} value={p.id}>{p.name}</option>
-          ))}
-        </select>
+        {/* Parent select shown only when editing existing category */}
+        {parentId === undefined && (
+          <select
+            class="cat-parent-select filter-input"
+            value={selectedParent.value ?? ''}
+            onChange={e => {
+              const v = (e.target as HTMLSelectElement).value
+              selectedParent.value = v === '' ? null : Number(v)
+            }}
+          >
+            <option value="">None (top-level)</option>
+            {parentOpts.map(p => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+        )}
+        <div class="cat-edit-btns">
+          <button class="cat-btn cat-btn-save" onClick={save} disabled={saving.value}>Save</button>
+          <button class="cat-btn cat-btn-cancel" onClick={cancel}>Cancel</button>
+        </div>
       </div>
     )
   }
 
-  function renderSaveCancelBtns() {
+  function renderIconBtns(cat: Category, isTopLevel: boolean) {
     return (
-      <>
-        <button class="cat-btn cat-btn-save" onClick={save} disabled={saving.value}>Save</button>
-        <button class="cat-btn cat-btn-cancel" onClick={cancel}>Cancel</button>
-      </>
-    )
-  }
-
-  function renderHandle() {
-    return (
-      <span
-        class="cat-drag-handle"
-        onPointerDown={onHandlePointerDown}
-        onPointerUp={onHandlePointerUp}
-        title="Drag to reparent"
-        aria-hidden="true"
-      >
-        <svg width="8" height="13" viewBox="0 0 8 13" fill="currentColor">
-          <circle cx="2"  cy="1.5"  r="1.5"/>
-          <circle cx="6"  cy="1.5"  r="1.5"/>
-          <circle cx="2"  cy="6.5"  r="1.5"/>
-          <circle cx="6"  cy="6.5"  r="1.5"/>
-          <circle cx="2"  cy="11.5" r="1.5"/>
-          <circle cx="6"  cy="11.5" r="1.5"/>
-        </svg>
-      </span>
+      <div class="cat-icon-btns">
+        <button
+          class="cat-icon-btn"
+          title="Edit"
+          onClick={() => startEdit(cat)}
+          disabled={!isIdle}
+        >
+          <IconEdit />
+        </button>
+        {isTopLevel && (
+          <button
+            class="cat-icon-btn"
+            title="Add sub-category"
+            onClick={() => startAdd(cat.id)}
+            disabled={!isIdle}
+          >
+            <IconAddSub />
+          </button>
+        )}
+        <button
+          class="cat-icon-btn cat-icon-btn-danger"
+          title="Delete"
+          onClick={() => void remove(cat)}
+          disabled={!isIdle}
+        >
+          <IconTrash />
+        </button>
+      </div>
     )
   }
 
@@ -270,11 +327,10 @@ export function Categories() {
             <tr>
               <th class="cat-col-handle" />
               <th>Name</th>
-              <th class="cat-col-actions" />
             </tr>
           </thead>
           <tbody>
-            {/* "Promote to top-level" drop zone — appears only while dragging */}
+            {/* "Promote to top-level" drop zone */}
             {isDragging && (
               <tr
                 class={`cat-drop-zone ${dropTargetId.value === 'top' ? 'cat-drop-active' : ''}`}
@@ -283,7 +339,7 @@ export function Categories() {
                 onDragLeave={onDragLeave}
                 onDrop={e => void onDrop(e, 'top')}
               >
-                <td colSpan={3}>Drop here to promote to top-level</td>
+                <td colSpan={2}>Drop here to promote to top-level</td>
               </tr>
             )}
 
@@ -296,7 +352,6 @@ export function Categories() {
 
               return (
                 <Fragment key={cat.id}>
-                  {/* Top-level row — valid drop target for reparenting */}
                   <tr
                     class={`cat-row ${isDraggingThis ? 'cat-dragging' : ''} ${isDropTarget ? 'cat-drop-over' : ''}`}
                     draggable={isIdle}
@@ -307,28 +362,20 @@ export function Categories() {
                     onDragLeave={onDragLeave}
                     onDrop={e => void onDrop(e, cat.id)}
                   >
-                    <td class="cat-col-handle">
-                      {isIdle && renderHandle()}
-                    </td>
+                    <td class="cat-col-handle">{isIdle && renderHandle()}</td>
                     <td>
-                      {isEditingThis ? renderEditFields() : <strong>{cat.name}</strong>}
-                    </td>
-                    <td class="cat-col-actions">
-                      {isEditingThis ? renderSaveCancelBtns() : (
-                        <>
-                          <button class="cat-btn cat-btn-sub" onClick={() => startAdd(cat.id)} disabled={!isIdle}>+ Sub</button>
-                          <button class="cat-btn" onClick={() => startEdit(cat)} disabled={!isIdle}>Edit</button>
-                          <button class="cat-btn cat-btn-delete" onClick={() => void remove(cat)} disabled={!isIdle}>Delete</button>
-                        </>
+                      {isEditingThis ? renderEditRow() : (
+                        <div class="cat-name-row">
+                          <strong class="cat-name-text">{cat.name}</strong>
+                          {renderIconBtns(cat, true)}
+                        </div>
                       )}
                     </td>
                   </tr>
 
-                  {/* Sub-category rows — draggable but not drop targets */}
                   {kids.map(child => {
                     const isEditingChild  = m.type === 'edit' && m.id === child.id
                     const isDraggingChild = draggingId.value === child.id
-
                     return (
                       <tr
                         key={child.id}
@@ -337,62 +384,74 @@ export function Categories() {
                         onDragStart={e => onDragStart(e, child)}
                         onDragEnd={onDragEnd}
                       >
-                        <td class="cat-col-handle">
-                          {isIdle && renderHandle()}
-                        </td>
+                        <td class="cat-col-handle">{isIdle && renderHandle()}</td>
                         <td>
-                          <span class="cat-sub-indent">└</span>
-                          {isEditingChild ? renderEditFields() : <span>{child.name}</span>}
-                        </td>
-                        <td class="cat-col-actions">
-                          {isEditingChild ? renderSaveCancelBtns() : (
-                            <>
-                              <button class="cat-btn" onClick={() => startEdit(child)} disabled={!isIdle}>Edit</button>
-                              <button class="cat-btn cat-btn-delete" onClick={() => void remove(child)} disabled={!isIdle}>Delete</button>
-                            </>
+                          {isEditingChild ? (
+                            <div class="cat-sub-edit">
+                              <span class="cat-sub-indent">└</span>
+                              {renderEditRow()}
+                            </div>
+                          ) : (
+                            <div class="cat-name-row">
+                              <span class="cat-name-text">
+                                <span class="cat-sub-indent">└</span>
+                                {child.name}
+                              </span>
+                              {renderIconBtns(child, false)}
+                            </div>
                           )}
                         </td>
                       </tr>
                     )
                   })}
 
-                  {/* Inline add-sub row */}
                   {isAddingSubHere && (
                     <tr class="cat-row cat-row-sub cat-row-new">
                       <td class="cat-col-handle" />
                       <td>
-                        <span class="cat-sub-indent">└</span>
-                        <input
-                          class="cat-input filter-input"
-                          placeholder="Sub-category name"
-                          value={inputValue.value}
-                          onInput={e => { inputValue.value = (e.target as HTMLInputElement).value }}
-                          onKeyDown={onKey}
-                          autoFocus
-                        />
+                        <div class="cat-sub-edit">
+                          <span class="cat-sub-indent">└</span>
+                          <div class="cat-edit-row">
+                            <input
+                              class="cat-input filter-input"
+                              placeholder="Sub-category name"
+                              value={inputValue.value}
+                              onInput={e => { inputValue.value = (e.target as HTMLInputElement).value }}
+                              onKeyDown={onKey}
+                              autoFocus
+                            />
+                            <div class="cat-edit-btns">
+                              <button class="cat-btn cat-btn-save" onClick={save} disabled={saving.value}>Save</button>
+                              <button class="cat-btn cat-btn-cancel" onClick={cancel}>Cancel</button>
+                            </div>
+                          </div>
+                        </div>
                       </td>
-                      <td class="cat-col-actions">{renderSaveCancelBtns()}</td>
                     </tr>
                   )}
                 </Fragment>
               )
             })}
 
-            {/* Inline add-top-level row */}
             {isAddingTop && (
               <tr class="cat-row cat-row-new">
                 <td class="cat-col-handle" />
                 <td>
-                  <input
-                    class="cat-input filter-input"
-                    placeholder="Category name"
-                    value={inputValue.value}
-                    onInput={e => { inputValue.value = (e.target as HTMLInputElement).value }}
-                    onKeyDown={onKey}
-                    autoFocus
-                  />
+                  <div class="cat-edit-row">
+                    <input
+                      class="cat-input filter-input"
+                      placeholder="Category name"
+                      value={inputValue.value}
+                      onInput={e => { inputValue.value = (e.target as HTMLInputElement).value }}
+                      onKeyDown={onKey}
+                      autoFocus
+                    />
+                    <div class="cat-edit-btns">
+                      <button class="cat-btn cat-btn-save" onClick={save} disabled={saving.value}>Save</button>
+                      <button class="cat-btn cat-btn-cancel" onClick={cancel}>Cancel</button>
+                    </div>
+                  </div>
                 </td>
-                <td class="cat-col-actions">{renderSaveCancelBtns()}</td>
               </tr>
             )}
           </tbody>

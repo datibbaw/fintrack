@@ -442,7 +442,7 @@ body {
 
 /* ── Categories ────────────────────────────────────────────────────────────── */
 
-.categories { display: flex; flex-direction: column; gap: 1rem; }
+.categories { display: flex; flex-direction: column; gap: 1rem; padding-top: 1rem; }
 
 .categories-header {
   display: flex;
@@ -460,38 +460,71 @@ body {
   border-color: var(--accent);
 }
 
-.cat-add-btn:not(:disabled):hover {
-  background: var(--accent-light);
+.cat-add-btn:not(:disabled):hover { background: var(--accent-light); }
+
+/* ── Name row (idle state) ─────────────────────────────────────────────────── */
+
+.cat-name-row {
+  display: flex;
+  align-items: center;
+  gap: 1em;
 }
 
-.cat-col-actions {
-  width: 200px;
-  text-align: right;
-  white-space: nowrap;
+.cat-name-text { min-width: 0; }
+
+/* Icon action buttons — fade in on row hover */
+.cat-icon-btns {
+  display: flex;
+  align-items: center;
+  gap: .1rem;
+  opacity: 0;
+  transition: opacity .12s;
+  flex-shrink: 0;
 }
 
-.cat-row-sub td:first-child { padding-left: 2.25rem; }
+.cat-row:hover .cat-icon-btns,
+.cat-row:focus-within .cat-icon-btns { opacity: 1; }
 
-.cat-sub-indent {
+.cat-icon-btn {
+  border: none;
+  background: transparent;
   color: var(--text-muted);
-  margin-right: .5rem;
-  font-size: .85rem;
-  user-select: none;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: var(--radius);
+  display: inline-flex;
+  align-items: center;
+  transition: background .12s, color .12s;
 }
 
-.cat-row-new { background: var(--accent-light); }
+.cat-icon-btn:disabled { opacity: .3; cursor: default; }
+.cat-icon-btn:not(:disabled):hover { background: var(--border); color: var(--text); }
 
-.cat-edit-fields {
+.cat-icon-btn-danger { color: var(--debit); }
+.cat-icon-btn-danger:not(:disabled):hover { background: var(--debit-light); color: var(--debit); }
+
+/* ── Edit row ──────────────────────────────────────────────────────────────── */
+
+.cat-edit-row {
   display: flex;
   align-items: center;
   gap: .5rem;
   flex-wrap: wrap;
 }
 
+.cat-sub-edit {
+  display: flex;
+  align-items: center;
+  gap: .25rem;
+}
+
+.cat-edit-btns { display: flex; gap: .25rem; }
+
 .cat-input { flex: 1; min-width: 120px; max-width: 220px; }
 
 .cat-parent-select { min-width: 140px; }
 
+/* Save / Cancel text buttons */
 .cat-btn {
   border: 1px solid var(--border);
   background: transparent;
@@ -501,35 +534,25 @@ body {
   border-radius: var(--radius);
   cursor: pointer;
   transition: background .15s, color .15s, border-color .15s;
-  margin-left: .25rem;
 }
 
 .cat-btn:disabled { opacity: .35; cursor: default; }
+.cat-btn:not(:disabled):hover { background: var(--surface-alt); color: var(--text); }
 
-.cat-btn:not(:disabled):hover {
-  background: var(--surface-alt);
-  color: var(--text);
-}
-
-.cat-btn-sub:not(:disabled):hover {
-  background: var(--accent-light);
-  color: var(--accent);
-  border-color: var(--accent);
-}
-
-.cat-btn-save {
-  background: var(--accent);
-  color: #fff;
-  border-color: var(--accent);
-}
-
+.cat-btn-save { background: var(--accent); color: #fff; border-color: var(--accent); }
 .cat-btn-save:not(:disabled):hover { opacity: .85; color: #fff; background: var(--accent); }
 
-.cat-btn-delete:not(:disabled):hover {
-  background: var(--debit-light);
-  color: var(--debit);
-  border-color: var(--debit);
+/* ── Misc ──────────────────────────────────────────────────────────────────── */
+
+.cat-sub-indent {
+  color: var(--text-muted);
+  margin-right: .35rem;
+  font-size: .85rem;
+  user-select: none;
+  flex-shrink: 0;
 }
+
+.cat-row-new { background: var(--accent-light); }
 
 /* ── Category drag handle ──────────────────────────────────────────────────── */
 

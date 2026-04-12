@@ -47,6 +47,7 @@ pub struct CategoryDto {
     pub name: String,
     pub parent_id: Option<i64>,
     pub parent: Option<String>,
+    pub transaction_count: i64,
 }
 
 #[derive(Serialize)]
@@ -280,6 +281,30 @@ fn query_transactions(
     Ok(TransactionsResponse { rows, total })
 }
 
+// ── Category query ────────────────────────────────────────────────────────────
+
+fn query_categories(conn: &rusqlite::Connection) -> anyhow::Result<Vec<CategoryDto>> {
+    let mut stmt = conn.prepare(
+        "SELECT c.id, c.name, c.parent_id, p.name AS parent, \
+                COUNT(t.id) AS transaction_count \
+         FROM categories c \
+         LEFT JOIN categories p ON c.parent_id = p.id \
+         LEFT JOIN transactions t ON t.category_id = c.id \
+         GROUP BY c.id \
+         ORDER BY c.parent_id NULLS FIRST, c.name"
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(CategoryDto {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            parent_id: row.get(2)?,
+            parent: row.get(3)?,
+            transaction_count: row.get(4)?,
+        })
+    })?.collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
 // ── API handlers ──────────────────────────────────────────────────────────────
 
 async fn api_accounts(State(db): State<Db>) -> Result<Json<Vec<Account>>, ApiError> {
@@ -297,22 +322,7 @@ async fn api_categories(State(db): State<Db>) -> Result<Json<Vec<CategoryDto>>, 
     let db = Arc::clone(&db);
     let result = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
         let conn = db.lock().map_err(|_| anyhow!("db lock poisoned"))?;
-        let cats = db::list_categories(&conn)?;
-        let dtos = cats
-            .iter()
-            .map(|c| {
-                let parent = c.parent_id
-                    .and_then(|pid| cats.iter().find(|p| p.id == pid))
-                    .map(|p| p.name.clone());
-                CategoryDto {
-                    id: c.id,
-                    name: c.name.clone(),
-                    parent_id: c.parent_id,
-                    parent,
-                }
-            })
-            .collect();
-        Ok(dtos)
+        query_categories(&conn)
     })
     .await
     .map_err(|e| anyhow!("thread error: {e}"))??;
@@ -333,7 +343,7 @@ async fn api_create_category(
         let parent = cat.parent_id
             .and_then(|pid| cats.iter().find(|p| p.id == pid))
             .map(|p| p.name.clone());
-        Ok(CategoryDto { id: cat.id, name: cat.name.clone(), parent_id: cat.parent_id, parent })
+        Ok(CategoryDto { id: cat.id, name: cat.name.clone(), parent_id: cat.parent_id, parent, transaction_count: 0 })
     })
     .await
     .map_err(|e| anyhow!("thread error: {e}"))??;
