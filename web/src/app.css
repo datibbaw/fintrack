@@ -640,7 +640,7 @@ body {
 }
 
 .cat-rules-panel-row > td {
-  padding: 0 .5rem .5rem 2.5rem;
+  padding: .5rem .5rem .5rem 2.5rem;
   background: var(--surface);
 }
 
