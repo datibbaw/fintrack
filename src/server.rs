@@ -154,57 +154,79 @@ fn query_summary(
         p.account.as_deref(),
     );
 
-    let sql = format!(
-        "SELECT \
-           c.id            AS category_id, \
-           COALESCE(c.name, 'Uncategorized') AS category, \
-           c.parent_id, \
-           p.name          AS parent, \
-           SUM(COALESCE(t.debit,  0)) AS total_debit, \
-           SUM(COALESCE(t.credit, 0)) AS total_credit, \
-           COUNT(*) AS tx_count \
+    // Grand totals: simple sum with no rollup so each transaction is counted once.
+    let totals_sql = format!(
+        "SELECT COALESCE(SUM(t.debit),0), COALESCE(SUM(t.credit),0) \
          FROM transactions t \
-         LEFT JOIN categories c ON t.category_id = c.id \
+         JOIN accounts a ON t.account_id = a.id \
+         WHERE 1=1{filter_clause}"
+    );
+    let (total_debit, total_credit): (f64, f64) = conn.query_row(
+        &totals_sql,
+        rusqlite::params_from_iter(vals.iter()),
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+
+    // Per-category rows with parent rollup.
+    //
+    // Each sub-category transaction contributes to two buckets via UNION ALL:
+    //   1. Its own category  (appears in the sub-category row)
+    //   2. Its parent        (rolled up into the parent row)
+    //
+    // Top-level and uncategorised transactions contribute to only one bucket.
+    // Grand totals are computed above from raw transactions to avoid double-counting.
+    let sql = format!(
+        "SELECT sub.cat_id, \
+                COALESCE(c.name, 'Uncategorized') AS category, \
+                c.parent_id, p.name AS parent, \
+                SUM(sub.d)   AS total_debit, \
+                SUM(sub.cr)  AS total_credit, \
+                SUM(sub.cnt) AS tx_count \
+         FROM ( \
+           SELECT t.category_id AS cat_id, \
+                  COALESCE(t.debit,0)  AS d, \
+                  COALESCE(t.credit,0) AS cr, \
+                  1 AS cnt \
+           FROM transactions t \
+           JOIN accounts a ON t.account_id = a.id \
+           WHERE 1=1{filter_clause} \
+           UNION ALL \
+           SELECT c2.parent_id AS cat_id, \
+                  COALESCE(t.debit,0)  AS d, \
+                  COALESCE(t.credit,0) AS cr, \
+                  1 AS cnt \
+           FROM transactions t \
+           JOIN categories c2 ON t.category_id = c2.id AND c2.parent_id IS NOT NULL \
+           JOIN accounts a ON t.account_id = a.id \
+           WHERE 1=1{filter_clause} \
+         ) sub \
+         LEFT JOIN categories c ON sub.cat_id = c.id \
          LEFT JOIN categories p ON c.parent_id = p.id \
-         JOIN  accounts a ON t.account_id = a.id \
-         WHERE 1=1{filter_clause} \
-         GROUP BY c.id \
-         ORDER BY ABS(total_credit - total_debit) DESC"
+         GROUP BY sub.cat_id \
+         ORDER BY ABS(SUM(sub.cr) - SUM(sub.d)) DESC"
     );
 
+    // filter vals are used in both sub-queries of the UNION ALL.
+    let mut double_vals = vals.clone();
+    double_vals.extend(vals.iter().cloned());
+
     let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt
-        .query_map(rusqlite::params_from_iter(vals.iter()), |row| {
-            Ok((
-                row.get::<_, Option<i64>>(0)?,   // category_id
-                row.get::<_, String>(1)?,         // category
-                row.get::<_, Option<i64>>(2)?,   // parent_id
-                row.get::<_, Option<String>>(3)?, // parent
-                row.get::<_, f64>(4)?,            // debit
-                row.get::<_, f64>(5)?,            // credit
-                row.get::<_, i64>(6)?,            // count
-            ))
+    let summary_rows = stmt
+        .query_map(rusqlite::params_from_iter(double_vals.iter()), |row| {
+            let debit:  f64 = row.get(4)?;
+            let credit: f64 = row.get(5)?;
+            Ok(SummaryRow {
+                category_id: row.get(0)?,
+                category:    row.get(1)?,
+                parent_id:   row.get(2)?,
+                parent:      row.get(3)?,
+                debit,
+                credit,
+                net:   credit - debit,
+                count: row.get(6)?,
+            })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-
-    let mut total_debit = 0f64;
-    let mut total_credit = 0f64;
-    let mut summary_rows = Vec::new();
-
-    for (category_id, category, parent_id, parent, debit, credit, count) in rows {
-        total_debit += debit;
-        total_credit += credit;
-        summary_rows.push(SummaryRow {
-            category,
-            category_id,
-            parent,
-            parent_id,
-            debit,
-            credit,
-            net: credit - debit,
-            count,
-        });
-    }
 
     Ok(SummaryResponse {
         rows: summary_rows,
