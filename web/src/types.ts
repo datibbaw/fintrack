@@ -12,6 +12,15 @@ export interface Category {
   parent_id: number | null
   parent: string | null
   transaction_count: number
+  rule_count: number
+}
+
+export interface Rule {
+  id: number
+  category_id: number
+  field: string
+  pattern: string
+  priority: number
 }
 
 export interface SummaryRow {

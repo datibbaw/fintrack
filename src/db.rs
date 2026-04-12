@@ -201,6 +201,23 @@ pub fn add_rule(conn: &Connection, category_id: i64, field: &str, pattern: &str,
     Ok(conn.last_insert_rowid())
 }
 
+pub fn list_rules_for_category(conn: &Connection, category_id: i64) -> Result<Vec<Rule>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, category_id, field, pattern, priority \
+         FROM rules WHERE category_id = ?1 ORDER BY priority DESC, id"
+    )?;
+    let rows = stmt.query_map(params![category_id], |row| {
+        Ok(Rule {
+            id: row.get(0)?,
+            category_id: row.get(1)?,
+            field: row.get(2)?,
+            pattern: row.get(3)?,
+            priority: row.get(4)?,
+        })
+    })?.collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
 pub fn list_rules(conn: &Connection, category_name: Option<&str>) -> Result<Vec<(Rule, String)>> {
     let mut out = Vec::new();
     if let Some(cat) = category_name {

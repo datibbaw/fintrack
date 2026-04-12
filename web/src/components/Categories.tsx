@@ -1,21 +1,31 @@
 import { signal, effect } from '@preact/signals'
 import { useSignal } from '@preact/signals'
 import { Fragment } from 'preact'
+import Prism from 'prismjs'
+import 'prismjs/components/prism-regex'
 import { api } from '../api'
 import { activeTab } from '../store'
-import type { Category } from '../types'
+import type { Category, Rule } from '../types'
+
+// ── Regex syntax highlight ─────────────────────────────────────────────────────
+
+function RegexHighlight({ pattern }: { pattern: string }) {
+  const html = Prism.highlight(pattern, Prism.languages['regex'], 'regex')
+  return <code class="regex-hl" dangerouslySetInnerHTML={{ __html: html }} />
+}
 
 type EditMode =
   | { type: 'idle' }
   | { type: 'edit'; id: number }
   | { type: 'add'; parentId: number | null }
 
-// ── Module-level data state ────────────────────────────────────────────────────
+// ── Module-level data & rules cache ───────────────────────────────────────────
 
 const categories  = signal<Category[]>([])
 const loading     = signal(false)
 const fetchError  = signal<string | null>(null)
 const refreshTick = signal(0)
+const rulesCache  = signal<Record<number, Rule[]>>({})
 
 effect(() => {
   if (activeTab.value !== 'categories') return
@@ -29,7 +39,10 @@ effect(() => {
     .finally(  () => { loading.value = false })
 })
 
-function reload() { refreshTick.value++ }
+function reload() {
+  rulesCache.value = {}   // invalidate cached rules so panels re-fetch
+  refreshTick.value++
+}
 
 // ── Drag guard variables ───────────────────────────────────────────────────────
 
@@ -74,6 +87,17 @@ function IconTrash() {
   )
 }
 
+function IconClose() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" stroke-width="2.5" stroke-linecap="round"
+      aria-hidden="true">
+      <line x1="18" y1="6"  x2="6"  y2="18"/>
+      <line x1="6"  y1="6"  x2="18" y2="18"/>
+    </svg>
+  )
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function Categories() {
@@ -84,6 +108,8 @@ export function Categories() {
   const saveError      = useSignal<string | null>(null)
   const draggingId     = useSignal<number | null>(null)
   const dropTargetId   = useSignal<number | 'top' | null>(null)
+  const openRulesId    = useSignal<number | null>(null)
+  const rulesLoading   = useSignal(false)
 
   const topLevel = categories.value.filter(c => c.parent_id === null)
 
@@ -151,6 +177,63 @@ export function Categories() {
   function onKey(e: KeyboardEvent) {
     if (e.key === 'Enter')  void save()
     if (e.key === 'Escape') cancel()
+  }
+
+  // ── Rules panel ────────────────────────────────────────────────────────────
+
+  async function toggleRules(catId: number) {
+    if (openRulesId.value === catId) { openRulesId.value = null; return }
+    openRulesId.value = catId
+    if (rulesCache.value[catId] !== undefined) return   // already cached
+    rulesLoading.value = true
+    try {
+      const rules = await api.getCategoryRules(catId)
+      rulesCache.value = { ...rulesCache.value, [catId]: rules }
+    } catch (e: any) {
+      saveError.value = e.message ?? String(e)
+      openRulesId.value = null
+    } finally {
+      rulesLoading.value = false
+    }
+  }
+
+  function renderRulesPanel(cat: Category) {
+    const rules     = rulesCache.value[cat.id]
+    const isLoading = rulesLoading.value && openRulesId.value === cat.id
+    return (
+      <div class="cat-rules-panel">
+        <div class="cat-rules-header">
+          <span class="cat-rules-title">Rules</span>
+          <button class="cat-icon-btn" title="Close" onClick={() => { openRulesId.value = null }}>
+            <IconClose />
+          </button>
+        </div>
+        {isLoading ? (
+          <p class="cat-rules-state">Loading…</p>
+        ) : !rules || rules.length === 0 ? (
+          <p class="cat-rules-state">No rules defined for this category.</p>
+        ) : (
+          <table class="data-table cat-rules-table">
+            <thead>
+              <tr>
+                <th>Field</th>
+                <th>Pattern</th>
+                <th class="col-number">Priority</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rules.map(rule => (
+                <tr key={rule.id}>
+                  <td class="mono">{rule.field}</td>
+                  <td><RegexHighlight pattern={rule.pattern} /></td>
+                  <td class="mono col-number">{rule.priority}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    )
   }
 
   // ── Drag & drop ────────────────────────────────────────────────────────────
@@ -236,7 +319,20 @@ export function Categories() {
     )
   }
 
-  function renderEditRow(parentId?: number | null) {
+  function renderRulesBtn(cat: Category) {
+    const isOpen   = openRulesId.value === cat.id
+    const hasRules = cat.rule_count > 0
+    return (
+      <button
+        class={`cat-rules-btn ${hasRules ? 'cat-rules-btn-has' : 'cat-rules-btn-none'} ${isOpen ? 'cat-rules-btn-open' : ''}`}
+        onClick={() => void toggleRules(cat.id)}
+      >
+        {cat.rule_count} {cat.rule_count === 1 ? 'rule' : 'rules'}
+      </button>
+    )
+  }
+
+  function renderEditRow() {
     return (
       <div class="cat-edit-row">
         <input
@@ -246,22 +342,19 @@ export function Categories() {
           onKeyDown={onKey}
           autoFocus
         />
-        {/* Parent select shown only when editing existing category */}
-        {parentId === undefined && (
-          <select
-            class="cat-parent-select filter-input"
-            value={selectedParent.value ?? ''}
-            onChange={e => {
-              const v = (e.target as HTMLSelectElement).value
-              selectedParent.value = v === '' ? null : Number(v)
-            }}
-          >
-            <option value="">None (top-level)</option>
-            {parentOpts.map(p => (
-              <option key={p.id} value={p.id}>{p.name}</option>
-            ))}
-          </select>
-        )}
+        <select
+          class="cat-parent-select filter-input"
+          value={selectedParent.value ?? ''}
+          onChange={e => {
+            const v = (e.target as HTMLSelectElement).value
+            selectedParent.value = v === '' ? null : Number(v)
+          }}
+        >
+          <option value="">None (top-level)</option>
+          {parentOpts.map(p => (
+            <option key={p.id} value={p.id}>{p.name}</option>
+          ))}
+        </select>
         <div class="cat-edit-btns">
           <button class="cat-btn cat-btn-save" onClick={save} disabled={saving.value}>Save</button>
           <button class="cat-btn cat-btn-cancel" onClick={cancel}>Cancel</button>
@@ -273,30 +366,15 @@ export function Categories() {
   function renderIconBtns(cat: Category, isTopLevel: boolean) {
     return (
       <div class="cat-icon-btns">
-        <button
-          class="cat-icon-btn"
-          title="Edit"
-          onClick={() => startEdit(cat)}
-          disabled={!isIdle}
-        >
+        <button class="cat-icon-btn" title="Edit" onClick={() => startEdit(cat)} disabled={!isIdle}>
           <IconEdit />
         </button>
         {isTopLevel && (
-          <button
-            class="cat-icon-btn"
-            title="Add sub-category"
-            onClick={() => startAdd(cat.id)}
-            disabled={!isIdle}
-          >
+          <button class="cat-icon-btn" title="Add sub-category" onClick={() => startAdd(cat.id)} disabled={!isIdle}>
             <IconAddSub />
           </button>
         )}
-        <button
-          class="cat-icon-btn cat-icon-btn-danger"
-          title="Delete"
-          onClick={() => void remove(cat)}
-          disabled={!isIdle}
-        >
+        <button class="cat-icon-btn cat-icon-btn-danger" title="Delete" onClick={() => void remove(cat)} disabled={!isIdle}>
           <IconTrash />
         </button>
       </div>
@@ -330,7 +408,6 @@ export function Categories() {
             </tr>
           </thead>
           <tbody>
-            {/* "Promote to top-level" drop zone */}
             {isDragging && (
               <tr
                 class={`cat-drop-zone ${dropTargetId.value === 'top' ? 'cat-drop-active' : ''}`}
@@ -349,9 +426,11 @@ export function Categories() {
               const isAddingSubHere = m.type === 'add' && m.parentId === cat.id
               const isDraggingThis  = draggingId.value === cat.id
               const isDropTarget    = dropTargetId.value === cat.id
+              const isRulesOpen     = openRulesId.value === cat.id
 
               return (
                 <Fragment key={cat.id}>
+                  {/* Top-level category row */}
                   <tr
                     class={`cat-row ${isDraggingThis ? 'cat-dragging' : ''} ${isDropTarget ? 'cat-drop-over' : ''}`}
                     draggable={isIdle}
@@ -367,44 +446,63 @@ export function Categories() {
                       {isEditingThis ? renderEditRow() : (
                         <div class="cat-name-row">
                           <strong class="cat-name-text">{cat.name}</strong>
+                          {renderRulesBtn(cat)}
                           {renderIconBtns(cat, true)}
                         </div>
                       )}
                     </td>
                   </tr>
 
+                  {/* Rules panel for top-level category */}
+                  {isRulesOpen && (
+                    <tr class="cat-rules-panel-row">
+                      <td colSpan={2}>{renderRulesPanel(cat)}</td>
+                    </tr>
+                  )}
+
+                  {/* Sub-category rows */}
                   {kids.map(child => {
                     const isEditingChild  = m.type === 'edit' && m.id === child.id
                     const isDraggingChild = draggingId.value === child.id
+                    const isChildRulesOpen = openRulesId.value === child.id
                     return (
-                      <tr
-                        key={child.id}
-                        class={`cat-row cat-row-sub ${isDraggingChild ? 'cat-dragging' : ''}`}
-                        draggable={isIdle}
-                        onDragStart={e => onDragStart(e, child)}
-                        onDragEnd={onDragEnd}
-                      >
-                        <td class="cat-col-handle">{isIdle && renderHandle()}</td>
-                        <td>
-                          {isEditingChild ? (
-                            <div class="cat-sub-edit">
-                              <span class="cat-sub-indent">└</span>
-                              {renderEditRow()}
-                            </div>
-                          ) : (
-                            <div class="cat-name-row">
-                              <span class="cat-name-text">
+                      <Fragment key={child.id}>
+                        <tr
+                          class={`cat-row cat-row-sub ${isDraggingChild ? 'cat-dragging' : ''}`}
+                          draggable={isIdle}
+                          onDragStart={e => onDragStart(e, child)}
+                          onDragEnd={onDragEnd}
+                        >
+                          <td class="cat-col-handle">{isIdle && renderHandle()}</td>
+                          <td>
+                            {isEditingChild ? (
+                              <div class="cat-sub-edit">
                                 <span class="cat-sub-indent">└</span>
-                                {child.name}
-                              </span>
-                              {renderIconBtns(child, false)}
-                            </div>
-                          )}
-                        </td>
-                      </tr>
+                                {renderEditRow()}
+                              </div>
+                            ) : (
+                              <div class="cat-name-row">
+                                <span class="cat-name-text">
+                                  <span class="cat-sub-indent">└</span>{child.name}
+                                </span>
+                                {renderRulesBtn(child)}
+                                {renderIconBtns(child, false)}
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+
+                        {/* Rules panel for sub-category */}
+                        {isChildRulesOpen && (
+                          <tr class="cat-rules-panel-row">
+                            <td colSpan={2}>{renderRulesPanel(child)}</td>
+                          </tr>
+                        )}
+                      </Fragment>
                     )
                   })}
 
+                  {/* Inline add-sub row */}
                   {isAddingSubHere && (
                     <tr class="cat-row cat-row-sub cat-row-new">
                       <td class="cat-col-handle" />

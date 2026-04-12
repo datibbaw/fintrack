@@ -1,4 +1,4 @@
-import type { Account, Category, SummaryResponse, TransactionsResponse } from './types'
+import type { Account, Category, Rule, SummaryResponse, TransactionsResponse } from './types'
 
 async function get<T>(path: string, params?: Record<string, string>): Promise<T> {
   const url = new URL(path, window.location.href)
@@ -38,6 +38,10 @@ export const api = {
 
   categories(): Promise<Category[]> {
     return get('/api/categories')
+  },
+
+  getCategoryRules(id: number): Promise<Rule[]> {
+    return get(`/api/categories/${id}/rules`)
   },
 
   createCategory(name: string, parentId: number | null): Promise<Category> {

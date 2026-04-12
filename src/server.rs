@@ -48,6 +48,16 @@ pub struct CategoryDto {
     pub parent_id: Option<i64>,
     pub parent: Option<String>,
     pub transaction_count: i64,
+    pub rule_count: i64,
+}
+
+#[derive(Serialize)]
+pub struct RuleDto {
+    pub id: i64,
+    pub category_id: i64,
+    pub field: String,
+    pub pattern: String,
+    pub priority: i64,
 }
 
 #[derive(Serialize)]
@@ -286,10 +296,12 @@ fn query_transactions(
 fn query_categories(conn: &rusqlite::Connection) -> anyhow::Result<Vec<CategoryDto>> {
     let mut stmt = conn.prepare(
         "SELECT c.id, c.name, c.parent_id, p.name AS parent, \
-                COUNT(t.id) AS transaction_count \
+                COUNT(DISTINCT t.id) AS transaction_count, \
+                COUNT(DISTINCT r.id) AS rule_count \
          FROM categories c \
          LEFT JOIN categories p ON c.parent_id = p.id \
          LEFT JOIN transactions t ON t.category_id = c.id \
+         LEFT JOIN rules r ON r.category_id = c.id \
          GROUP BY c.id \
          ORDER BY c.parent_id NULLS FIRST, c.name"
     )?;
@@ -300,6 +312,7 @@ fn query_categories(conn: &rusqlite::Connection) -> anyhow::Result<Vec<CategoryD
             parent_id: row.get(2)?,
             parent: row.get(3)?,
             transaction_count: row.get(4)?,
+            rule_count: row.get(5)?,
         })
     })?.collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
@@ -343,7 +356,7 @@ async fn api_create_category(
         let parent = cat.parent_id
             .and_then(|pid| cats.iter().find(|p| p.id == pid))
             .map(|p| p.name.clone());
-        Ok(CategoryDto { id: cat.id, name: cat.name.clone(), parent_id: cat.parent_id, parent, transaction_count: 0 })
+        Ok(CategoryDto { id: cat.id, name: cat.name.clone(), parent_id: cat.parent_id, parent, transaction_count: 0, rule_count: 0 })
     })
     .await
     .map_err(|e| anyhow!("thread error: {e}"))??;
@@ -377,6 +390,27 @@ async fn api_delete_category(
     .await
     .map_err(|e| anyhow!("thread error: {e}"))??;
     Ok(StatusCode::NO_CONTENT)
+}
+
+async fn api_category_rules(
+    State(db): State<Db>,
+    Path(id): Path<i64>,
+) -> Result<Json<Vec<RuleDto>>, ApiError> {
+    let db = Arc::clone(&db);
+    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
+        let conn = db.lock().map_err(|_| anyhow!("db lock poisoned"))?;
+        let rules = db::list_rules_for_category(&conn, id)?;
+        Ok(rules.into_iter().map(|r| RuleDto {
+            id: r.id,
+            category_id: r.category_id,
+            field: r.field,
+            pattern: r.pattern,
+            priority: r.priority,
+        }).collect::<Vec<_>>())
+    })
+    .await
+    .map_err(|e| anyhow!("thread error: {e}"))??;
+    Ok(Json(result))
 }
 
 async fn api_summary(
@@ -444,6 +478,7 @@ pub async fn serve(db_path: &str, port: u16, open: bool) -> anyhow::Result<()> {
         .route("/accounts", get(api_accounts))
         .route("/categories", get(api_categories).post(api_create_category))
         .route("/categories/:id", put(api_update_category).delete(api_delete_category))
+        .route("/categories/:id/rules", get(api_category_rules))
         .route("/summary", get(api_summary))
         .route("/transactions", get(api_transactions));
 
