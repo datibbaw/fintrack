@@ -6,6 +6,7 @@ import { activeTab, filterAccount } from './store'
 import { FilterBar } from './components/FilterBar'
 import { Summary } from './components/Summary'
 import { Transactions } from './components/Transactions'
+import { Categories } from './components/Categories'
 
 // ── App ───────────────────────────────────────────────────────────────────────
 
@@ -47,15 +48,23 @@ export function App() {
           >
             Transactions
           </button>
+          <button
+            class={`tab-btn ${activeTab.value === 'categories' ? 'active' : ''}`}
+            onClick={() => { activeTab.value = 'categories' }}
+          >
+            Categories
+          </button>
         </nav>
       </header>
 
-      <FilterBar accounts={accounts.value} />
+      {activeTab.value !== 'categories' && <FilterBar accounts={accounts.value} />}
 
       <main class="main">
         {activeTab.value === 'summary'
           ? <Summary categories={categories.value} />
-          : <Transactions categories={categories.value} />
+          : activeTab.value === 'transactions'
+          ? <Transactions categories={categories.value} />
+          : <Categories />
         }
       </main>
     </div>
