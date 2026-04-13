@@ -2,7 +2,10 @@ use anyhow::{anyhow, bail, Result};
 use regex::Regex;
 use rust_embed::RustEmbed;
 use serde::Deserialize;
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    hash::Hash,
+};
 
 // ── Embedded format assets ─────────────────────────────────────────────────────
 
@@ -14,50 +17,103 @@ struct FormatAssets;
 
 #[derive(Debug, Deserialize)]
 pub struct Format {
-    pub name: String,
+    name: String,
     /// Entries evaluated in order; first match wins.
     #[serde(default)]
-    pub account: Vec<ValueEntry>,
+    account: Vec<ValueEntry>,
     /// Entries evaluated in order; first match wins.
     #[serde(default)]
-    pub currency: Vec<ValueEntry>,
+    currency: Vec<ValueEntry>,
     /// Tried in order; the first entry whose column expressions all match the file wins.
-    pub header: Vec<HeaderDef>,
+    header: Vec<HeaderDef>,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct ValueEntry {
+struct ValueEntry {
     /// If present, the cell at `location` must match `expression` before `value` is tried.
-    pub condition: Option<CellMatch>,
-    pub value: CellMatch,
+    condition: Option<CellMatch>,
+    value: CellMatch,
+}
+
+impl ValueEntry {
+    fn resolve<'a>(&self, grid: &'a [Vec<String>]) -> Option<(&'a str, regex::Captures<'a>)> {
+        if let Some(condition) = &self.condition {
+            if !condition.is_match(grid) {
+                return None;
+            }
+        }
+
+        self.value.resolve(grid)
+    }
 }
 
 #[derive(Debug, Deserialize)]
-pub struct CellMatch {
+struct CellMatch {
     /// Cell reference, e.g. "B1" (column B, first row). Rows start at 1.
-    pub location: String,
+    location: String,
     /// Regex applied to the trimmed cell content. For `value`, capture group 1 is
     /// returned when present; otherwise the full match is used.
-    pub expression: String,
+    #[serde(with = "serde_regex")]
+    expression: Regex,
+}
+
+impl CellMatch {
+    fn coordinate(&self) -> (usize, usize) {
+        parse_cell_ref(&self.location)
+    }
+
+    fn is_match(&self, grid: &[Vec<String>]) -> bool {
+        let (col, row) = self.coordinate();
+        self.expression.is_match(get_cell(grid, col, row))
+    }
+
+    fn resolve<'a>(&self, grid: &'a [Vec<String>]) -> Option<(&'a str, regex::Captures<'a>)> {
+        let (col, row) = self.coordinate();
+        let cell = get_cell(grid, col, row);
+        self.expression.captures(cell).map(|caps| (cell, caps))
+    }
 }
 
 #[derive(Debug, Deserialize)]
-pub struct HeaderDef {
+struct HeaderDef {
     /// 1-based row number of the column header row. Data rows begin on the next row.
-    pub row: usize,
-    pub mappings: Vec<ColumnMapping>,
+    row: usize,
+    mappings: Vec<ColumnMapping>,
+}
+
+impl HeaderDef {
+    fn is_match(&self, grid: &[Vec<String>]) -> bool {
+        let row = self.row - 1;
+        self.mappings.iter().all(|m| m.is_match(grid, row))
+    }
+
+    fn fields(&self) -> Vec<Field> {
+        self.mappings.iter().map(|m| m.field).collect()
+    }
 }
 
 #[derive(Debug, Deserialize)]
-pub struct ColumnMapping {
+struct ColumnMapping {
     /// Column letter(s), e.g. "A" or "C". Rows are given by `HeaderDef::row`.
-    pub column: String,
+    column: String,
     /// Regex that must match the header cell. Acts as a safety check that the
     /// column contains what the format definition expects.
-    pub expression: String,
+    #[serde(with = "serde_regex")]
+    expression: Regex,
     /// Transaction field to populate: date | code | description | ref1 | ref2 |
     /// ref3 | status | debit | credit
-    pub field: String,
+    field: Field,
+}
+
+impl ColumnMapping {
+    fn index(&self) -> usize {
+        parse_cell_ref(&self.column).0
+    }
+
+    fn is_match(&self, grid: &[Vec<String>], row: usize) -> bool {
+        let col = self.index();
+        self.expression.is_match(get_cell(grid, col, row))
+    }
 }
 
 // ── Parsed output ──────────────────────────────────────────────────────────────
@@ -87,84 +143,62 @@ pub struct ParsedRow {
 
 // ── Validation ─────────────────────────────────────────────────────────────────
 
-const VALID_FIELDS: &[&str] = &[
-    "date", "code", "description", "ref1", "ref2", "ref3", "status", "debit", "credit",
+#[derive(Debug, Deserialize, PartialEq, Eq, Hash, Copy, Clone)]
+#[serde(rename_all = "lowercase")]
+enum Field {
+    Date,
+    Code,
+    Description,
+    Ref1,
+    Ref2,
+    Ref3,
+    Status,
+    Debit,
+    Credit,
+}
+
+const REQUIRED_FIELDS: &[Field] = &[Field::Date, Field::Debit, Field::Credit];
+const IDENTIFIER_FIELDS: &[Field] = &[
+    Field::Code,
+    Field::Description,
+    Field::Ref1,
+    Field::Ref2,
+    Field::Ref3,
 ];
-const REQUIRED_FIELDS: &[&str] = &["date", "debit", "credit"];
-const IDENTIFIER_FIELDS: &[&str] = &["code", "description", "ref1", "ref2", "ref3"];
 
 fn validate(fmt: &Format) -> Result<()> {
-    for (kind, entries) in &[("account", &fmt.account), ("currency", &fmt.currency)] {
-        for (i, entry) in entries.iter().enumerate() {
-            if let Some(cond) = &entry.condition {
-                parse_cell_ref(&cond.location).map_err(|e| {
-                    anyhow!(
-                        "format '{}': {}[{i}].condition.location: {e}",
-                        fmt.name,
-                        kind
-                    )
-                })?;
-                Regex::new(&cond.expression).map_err(|e| {
-                    anyhow!(
-                        "format '{}': {}[{i}].condition.expression: {e}",
-                        fmt.name,
-                        kind
-                    )
-                })?;
-            }
-            parse_cell_ref(&entry.value.location).map_err(|e| {
-                anyhow!(
-                    "format '{}': {}[{i}].value.location: {e}",
-                    fmt.name,
-                    kind
-                )
-            })?;
-            Regex::new(&entry.value.expression).map_err(|e| {
-                anyhow!(
-                    "format '{}': {}[{i}].value.expression: {e}",
-                    fmt.name,
-                    kind
-                )
-            })?;
-        }
-    }
-
     if fmt.header.is_empty() {
-        bail!("format '{}': 'header' must have at least one entry", fmt.name);
+        bail!(
+            "format '{}': 'header' must have at least one entry",
+            fmt.name
+        );
     }
 
     for (h, hdr) in fmt.header.iter().enumerate() {
         if hdr.row < 1 {
             bail!("format '{}': header[{h}].row must be >= 1", fmt.name);
         }
-        let mut seen: HashSet<&str> = HashSet::new();
-        for (i, m) in hdr.mappings.iter().enumerate() {
-            parse_col_ref(&m.column).map_err(|e| {
-                anyhow!("format '{}': header[{h}].mappings[{i}].column: {e}", fmt.name)
-            })?;
-            Regex::new(&m.expression).map_err(|e| {
-                anyhow!("format '{}': header[{h}].mappings[{i}].expression: {e}", fmt.name)
-            })?;
-            if !VALID_FIELDS.contains(&m.field.as_str()) {
-                bail!(
-                    "format '{}': header[{h}].mappings[{i}].field '{}' is not valid; must be one of: {}",
-                    fmt.name, m.field, VALID_FIELDS.join(", ")
-                );
-            }
-            seen.insert(m.field.as_str());
-        }
+        let seen: HashSet<Field> = hdr.fields().into_iter().collect();
+
         for req in REQUIRED_FIELDS {
             if !seen.contains(req) {
                 bail!(
-                    "format '{}': header[{h}].mappings must include a '{}' mapping",
-                    fmt.name, req
+                    "format '{}': header[{h}].mappings must include a '{:?}' mapping",
+                    fmt.name,
+                    req
                 );
             }
         }
+
         if !IDENTIFIER_FIELDS.iter().any(|f| seen.contains(f)) {
             bail!(
                 "format '{}': header[{h}].mappings must include at least one of: {}",
-                fmt.name, IDENTIFIER_FIELDS.join(", ")
+                fmt.name,
+                IDENTIFIER_FIELDS
+                    .iter()
+                    .map(|f| format!("{:?}", f))
+                    .collect::<Vec<_>>()
+                    .join(", ")
             );
         }
     }
@@ -173,36 +207,21 @@ fn validate(fmt: &Format) -> Result<()> {
 }
 
 // ── Cell/column reference parsing ──────────────────────────────────────────────
-
 /// Parse "B4" → (col=1, row=3) — both 0-based.
-fn parse_cell_ref(s: &str) -> Result<(usize, usize)> {
-    let col_str: String = s.chars().take_while(|c| c.is_ascii_alphabetic()).collect();
-    let row_str: String = s.chars().skip_while(|c| c.is_ascii_alphabetic()).collect();
-    if col_str.is_empty() || row_str.is_empty() {
-        bail!("expected a cell reference like 'A1' or 'B4', got '{s}'");
-    }
-    let col = col_letters_to_index(&col_str)?;
-    let row = row_str
-        .parse::<usize>()
-        .map_err(|_| anyhow!("invalid row number in cell reference '{s}'"))?
-        .checked_sub(1)
-        .ok_or_else(|| anyhow!("row numbers start at 1, got '{s}'"))?;
-    Ok((col, row))
-}
+fn parse_cell_ref(s: &str) -> (usize, usize) {
+    let mut col = 0usize;
+    let mut row_str = String::new();
 
-/// Parse "C" → 2 (0-based column index).
-fn parse_col_ref(s: &str) -> Result<usize> {
-    if s.is_empty() || !s.chars().all(|c| c.is_ascii_alphabetic()) {
-        bail!("expected a column reference like 'A' or 'C', got '{s}'");
+    for c in s.chars() {
+        if c.is_ascii_alphabetic() {
+            // Convert 'A' -> 1, 'B' -> 2, etc. (Base 26)
+            col = col * 26 + (c.to_ascii_uppercase() as usize - 'A' as usize + 1);
+        } else if c.is_ascii_digit() {
+            row_str.push(c);
+        }
     }
-    col_letters_to_index(s)
-}
 
-fn col_letters_to_index(s: &str) -> Result<usize> {
-    Ok(s.to_ascii_uppercase()
-        .chars()
-        .fold(0usize, |acc, c| acc * 26 + (c as usize - 'A' as usize + 1))
-        - 1)
+    (col - 1, row_str.parse::<usize>().unwrap_or(1) - 1)
 }
 
 // ── Public API ─────────────────────────────────────────────────────────────────
@@ -234,7 +253,7 @@ pub fn list_names() -> Vec<String> {
 
 // ── Applying a format to CSV content ──────────────────────────────────────────
 
-fn get_cell<'a>(grid: &'a [Vec<String>], col: usize, row: usize) -> &'a str {
+fn get_cell(grid: &[Vec<String>], col: usize, row: usize) -> &str {
     grid.get(row)
         .and_then(|r| r.get(col))
         .map(|s| s.trim())
@@ -243,89 +262,78 @@ fn get_cell<'a>(grid: &'a [Vec<String>], col: usize, row: usize) -> &'a str {
 
 /// Returns `(name, number)`. The name is the trimmed text in the cell before the
 /// capture match; if that prefix is empty, the number is used as the name.
-fn resolve_account(entry: &ValueEntry, grid: &[Vec<String>]) -> Result<Option<(String, String)>> {
-    if let Some(cond) = &entry.condition {
-        let (col, row) = parse_cell_ref(&cond.location)?;
-        if !Regex::new(&cond.expression)?.is_match(get_cell(grid, col, row)) {
-            return Ok(None);
-        }
-    }
-    let (col, row) = parse_cell_ref(&entry.value.location)?;
-    let cell = get_cell(grid, col, row);
-    Ok(Regex::new(&entry.value.expression)?.captures(cell).map(|caps| {
-        let m = caps.get(1).unwrap_or_else(|| caps.get(0).unwrap());
-        let number = m.as_str().to_string();
-        let prefix = cell[..m.start()].trim().to_string();
-        let name = if prefix.is_empty() { number.clone() } else { prefix };
-        (name, number)
-    }))
+fn to_account(cell: &str, caps: &regex::Captures) -> (String, String) {
+    let m = caps.get(1).unwrap_or_else(|| caps.get(0).unwrap());
+    let number = m.as_str().to_string();
+    let prefix = cell[..m.start()].trim().to_string();
+    let name = if prefix.is_empty() {
+        number.clone()
+    } else {
+        prefix
+    };
+    (name, number)
 }
 
-fn resolve_value(entry: &ValueEntry, grid: &[Vec<String>]) -> Result<Option<String>> {
-    if let Some(cond) = &entry.condition {
-        let (col, row) = parse_cell_ref(&cond.location)?;
-        if !Regex::new(&cond.expression)?.is_match(get_cell(grid, col, row)) {
-            return Ok(None);
-        }
+/// Iterates over `entries` and returns the first value that matches the file, applying `f` to the cell content and regex captures.
+/// Returns `None` if no entry matches.
+fn resolve_value_entry<F, U>(entries: &[ValueEntry], grid: &[Vec<String>], f: F) -> Option<U>
+where
+    F: Fn(&str, &regex::Captures) -> U,
+    U: Clone,
+{
+    entries
+        .iter()
+        .find_map(|e| e.resolve(grid).map(|(v, caps)| f(v, &caps)))
+}
+
+fn load_grid(content: &str) -> Result<Vec<Vec<String>>> {
+    let mut grid: Vec<Vec<String>> = Vec::new();
+    let mut reader = csv::ReaderBuilder::new()
+        .has_headers(false)
+        .flexible(true)
+        .from_reader(content.as_bytes());
+    for result in reader.records() {
+        grid.push(result?.iter().map(str::to_string).collect());
     }
-    let (col, row) = parse_cell_ref(&entry.value.location)?;
-    let cell = get_cell(grid, col, row);
-    Ok(Regex::new(&entry.value.expression)?.captures(cell).map(|caps| {
-        caps.get(1)
-            .unwrap_or_else(|| caps.get(0).unwrap())
-            .as_str()
-            .to_string()
-    }))
+    Ok(grid)
 }
 
 /// Parse CSV content using the given format definition.
 pub fn apply(fmt: &Format, content: &str) -> Result<ParsedCsv> {
     // Load all rows into a grid
-    let mut grid: Vec<Vec<String>> = Vec::new();
-    let mut rdr = csv::ReaderBuilder::new()
-        .has_headers(false)
-        .flexible(true)
-        .from_reader(content.as_bytes());
-    for result in rdr.records() {
-        grid.push(result?.iter().map(str::to_string).collect());
-    }
-
-    // Extract account and currency — first matching entry wins
-    let (account_name, account_number) = fmt
-        .account
-        .iter()
-        .find_map(|e| resolve_account(e, &grid).ok().flatten())
-        .map(|(name, number)| (Some(name), Some(number)))
-        .unwrap_or((None, None));
-    let currency = fmt
-        .currency
-        .iter()
-        .find_map(|e| resolve_value(e, &grid).ok().flatten());
+    let grid = load_grid(content)?;
+    let (account_name, account_number) = match resolve_value_entry(&fmt.account, &grid, to_account)
+    {
+        Some((name, number)) => (Some(name), Some(number)),
+        None => (None, None),
+    };
+    let currency = resolve_value_entry(&fmt.currency, &grid, |_v, caps| {
+        let m = caps.get(1).unwrap_or_else(|| caps.get(0).unwrap());
+        m.as_str().to_string()
+    });
 
     // Find the first header definition whose column expressions all match the file
-    let hdr = fmt.header.iter().find(|hdr| {
-        let row = hdr.row - 1;
-        hdr.mappings.iter().all(|m| {
-            parse_col_ref(&m.column)
-                .ok()
-                .and_then(|col| Regex::new(&m.expression).ok().map(|re| re.is_match(get_cell(&grid, col, row))))
-                .unwrap_or(false)
-        })
-    }).ok_or_else(|| anyhow!(
-        "no header entry in format '{}' matched the file; \
+    let hdr = fmt
+        .header
+        .iter()
+        .find(|hdr| hdr.is_match(&grid))
+        .ok_or_else(|| {
+            anyhow!(
+                "no header entry in format '{}' matched the file; \
          check that --format is correct",
-        fmt.name
-    ))?;
+                fmt.name
+            )
+        })?;
 
-    let mut field_col: HashMap<&str, usize> = HashMap::new();
+    let mut field_col: HashMap<Field, usize> = HashMap::new();
     for m in &hdr.mappings {
-        field_col.insert(m.field.as_str(), parse_col_ref(&m.column)?);
+        field_col.insert(m.field, m.index());
     }
 
     // Extract data rows
-    let get = |row: &Vec<String>, field: &str| -> String {
+    let get_field = |row: &Vec<String>, field: Field| -> String {
         field_col
-            .get(field)
+            .get(&field)
             .and_then(|&col| row.get(col))
             .map(|s| s.trim().to_string())
             .unwrap_or_default()
@@ -333,22 +341,27 @@ pub fn apply(fmt: &Format, content: &str) -> Result<ParsedCsv> {
 
     let mut rows = Vec::new();
     for row in grid.iter().skip(hdr.row) {
-        let date = get(row, "date");
+        let date = get_field(row, Field::Date);
         if date.is_empty() {
             continue;
         }
         rows.push(ParsedRow {
             date,
-            code:        get(row, "code"),
-            description: get(row, "description"),
-            ref1:        get(row, "ref1"),
-            ref2:        get(row, "ref2"),
-            ref3:        get(row, "ref3"),
-            status:      get(row, "status"),
-            debit:       get(row, "debit"),
-            credit:      get(row, "credit"),
+            code: get_field(row, Field::Code),
+            description: get_field(row, Field::Description),
+            ref1: get_field(row, Field::Ref1),
+            ref2: get_field(row, Field::Ref2),
+            ref3: get_field(row, Field::Ref3),
+            status: get_field(row, Field::Status),
+            debit: get_field(row, Field::Debit),
+            credit: get_field(row, Field::Credit),
         });
     }
 
-    Ok(ParsedCsv { account_number, account_name, currency, rows })
+    Ok(ParsedCsv {
+        account_number,
+        account_name,
+        currency,
+        rows,
+    })
 }

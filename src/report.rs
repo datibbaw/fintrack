@@ -9,9 +9,9 @@ use crate::db;
 fn period_label(from: Option<&str>, to: Option<&str>) -> String {
     match (from, to) {
         (Some(f), Some(t)) => format!("{f} → {t}"),
-        (Some(f), None)    => format!("from {f}"),
-        (None, Some(t))    => format!("up to {t}"),
-        (None, None)       => "all time".to_string(),
+        (Some(f), None) => format!("from {f}"),
+        (None, Some(t)) => format!("up to {t}"),
+        (None, None) => "all time".to_string(),
     }
 }
 
@@ -118,7 +118,16 @@ pub fn transactions(
 
     let mut stmt = conn.prepare(&sql)?;
 
-    type Row = (String, String, String, String, String, Option<f64>, Option<f64>, String);
+    type Row = (
+        String,
+        String,
+        String,
+        String,
+        String,
+        Option<f64>,
+        Option<f64>,
+        String,
+    );
     let rows: Vec<Row> = stmt
         .query_map(rusqlite::params_from_iter(vals.iter()), |row| {
             Ok((
@@ -141,10 +150,23 @@ pub fn transactions(
 
     let mut table = Table::new();
     table.load_preset(UTF8_FULL);
-    table.set_header(["Date", "Code", "Description", "Ref", "Category", "Debit", "Credit", "Account"]);
+    table.set_header([
+        "Date",
+        "Code",
+        "Description",
+        "Ref",
+        "Category",
+        "Debit",
+        "Credit",
+        "Account",
+    ]);
 
     for (date, code, desc, ref2, cat, debit, credit, acct) in &rows {
-        let desc_short = if desc.len() > 42 { &desc[..42] } else { desc.as_str() };
+        let desc_short = if desc.len() > 42 {
+            &desc[..42]
+        } else {
+            desc.as_str()
+        };
         table.add_row([
             date.as_str(),
             code.as_str(),

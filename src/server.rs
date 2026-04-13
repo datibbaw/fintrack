@@ -140,7 +140,9 @@ pub struct TransactionsParams {
     pub offset: i64,
 }
 
-fn default_limit() -> i64 { 100 }
+fn default_limit() -> i64 {
+    100
+}
 
 // ── DB helpers ────────────────────────────────────────────────────────────────
 
@@ -148,11 +150,8 @@ fn query_summary(
     conn: &rusqlite::Connection,
     p: &SummaryParams,
 ) -> anyhow::Result<SummaryResponse> {
-    let (filter_clause, vals) = db::build_filters(
-        p.from.as_deref(),
-        p.to.as_deref(),
-        p.account.as_deref(),
-    );
+    let (filter_clause, vals) =
+        db::build_filters(p.from.as_deref(), p.to.as_deref(), p.account.as_deref());
 
     // Grand totals: simple sum with no rollup so each transaction is counted once.
     let totals_sql = format!(
@@ -213,16 +212,16 @@ fn query_summary(
     let mut stmt = conn.prepare(&sql)?;
     let summary_rows = stmt
         .query_map(rusqlite::params_from_iter(double_vals.iter()), |row| {
-            let debit:  f64 = row.get(4)?;
+            let debit: f64 = row.get(4)?;
             let credit: f64 = row.get(5)?;
             Ok(SummaryRow {
                 category_id: row.get(0)?,
-                category:    row.get(1)?,
-                parent_id:   row.get(2)?,
-                parent:      row.get(3)?,
+                category: row.get(1)?,
+                parent_id: row.get(2)?,
+                parent: row.get(3)?,
                 debit,
                 credit,
-                net:   credit - debit,
+                net: credit - debit,
                 count: row.get(6)?,
             })
         })?
@@ -240,11 +239,8 @@ fn query_transactions(
     conn: &rusqlite::Connection,
     p: &TransactionsParams,
 ) -> anyhow::Result<TransactionsResponse> {
-    let (mut filter_clause, mut vals) = db::build_filters(
-        p.from.as_deref(),
-        p.to.as_deref(),
-        p.account.as_deref(),
-    );
+    let (mut filter_clause, mut vals) =
+        db::build_filters(p.from.as_deref(), p.to.as_deref(), p.account.as_deref());
 
     if p.uncategorized == Some(true) {
         filter_clause.push_str(" AND t.category_id IS NULL");
@@ -263,11 +259,10 @@ fn query_transactions(
          JOIN  accounts a ON t.account_id = a.id \
          WHERE 1=1{filter_clause}"
     );
-    let total: usize = conn.query_row(
-        &count_sql,
-        rusqlite::params_from_iter(vals.iter()),
-        |row| row.get(0),
-    )?;
+    let total: usize =
+        conn.query_row(&count_sql, rusqlite::params_from_iter(vals.iter()), |row| {
+            row.get(0)
+        })?;
 
     // Data query with pagination
     let mut paginated_vals = vals.clone();
@@ -325,18 +320,20 @@ fn query_categories(conn: &rusqlite::Connection) -> anyhow::Result<Vec<CategoryD
          LEFT JOIN transactions t ON t.category_id = c.id \
          LEFT JOIN rules r ON r.category_id = c.id \
          GROUP BY c.id \
-         ORDER BY c.parent_id NULLS FIRST, c.name"
+         ORDER BY c.parent_id NULLS FIRST, c.name",
     )?;
-    let rows = stmt.query_map([], |row| {
-        Ok(CategoryDto {
-            id: row.get(0)?,
-            name: row.get(1)?,
-            parent_id: row.get(2)?,
-            parent: row.get(3)?,
-            transaction_count: row.get(4)?,
-            rule_count: row.get(5)?,
-        })
-    })?.collect::<rusqlite::Result<Vec<_>>>()?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(CategoryDto {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                parent_id: row.get(2)?,
+                parent: row.get(3)?,
+                transaction_count: row.get(4)?,
+                rule_count: row.get(5)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
 }
 
@@ -373,12 +370,22 @@ async fn api_create_category(
         let conn = db.lock().map_err(|_| anyhow!("db lock poisoned"))?;
         let id = db::add_category(&conn, &body.name, body.parent_id)?;
         let cats = db::list_categories(&conn)?;
-        let cat = cats.iter().find(|c| c.id == id)
+        let cat = cats
+            .iter()
+            .find(|c| c.id == id)
             .ok_or_else(|| anyhow!("category not found after insert"))?;
-        let parent = cat.parent_id
+        let parent = cat
+            .parent_id
             .and_then(|pid| cats.iter().find(|p| p.id == pid))
             .map(|p| p.name.clone());
-        Ok(CategoryDto { id: cat.id, name: cat.name.clone(), parent_id: cat.parent_id, parent, transaction_count: 0, rule_count: 0 })
+        Ok(CategoryDto {
+            id: cat.id,
+            name: cat.name.clone(),
+            parent_id: cat.parent_id,
+            parent,
+            transaction_count: 0,
+            rule_count: 0,
+        })
     })
     .await
     .map_err(|e| anyhow!("thread error: {e}"))??;
@@ -422,13 +429,16 @@ async fn api_category_rules(
     let result = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
         let conn = db.lock().map_err(|_| anyhow!("db lock poisoned"))?;
         let rules = db::list_rules_for_category(&conn, id)?;
-        Ok(rules.into_iter().map(|r| RuleDto {
-            id: r.id,
-            category_id: r.category_id,
-            field: r.field,
-            pattern: r.pattern,
-            priority: r.priority,
-        }).collect::<Vec<_>>())
+        Ok(rules
+            .into_iter()
+            .map(|r| RuleDto {
+                id: r.id,
+                category_id: r.category_id,
+                field: r.field,
+                pattern: r.pattern,
+                priority: r.priority,
+            })
+            .collect::<Vec<_>>())
     })
     .await
     .map_err(|e| anyhow!("thread error: {e}"))??;
@@ -499,7 +509,10 @@ pub async fn serve(db_path: &str, port: u16, open: bool) -> anyhow::Result<()> {
     let api = Router::new()
         .route("/accounts", get(api_accounts))
         .route("/categories", get(api_categories).post(api_create_category))
-        .route("/categories/:id", put(api_update_category).delete(api_delete_category))
+        .route(
+            "/categories/:id",
+            put(api_update_category).delete(api_delete_category),
+        )
         .route("/categories/:id/rules", get(api_category_rules))
         .route("/summary", get(api_summary))
         .route("/transactions", get(api_transactions));
@@ -530,6 +543,8 @@ fn open_browser(url: &str) -> anyhow::Result<()> {
     #[cfg(target_os = "linux")]
     std::process::Command::new("xdg-open").arg(url).spawn()?;
     #[cfg(target_os = "windows")]
-    std::process::Command::new("cmd").args(["/c", "start", url]).spawn()?;
+    std::process::Command::new("cmd")
+        .args(["/c", "start", url])
+        .spawn()?;
     Ok(())
 }

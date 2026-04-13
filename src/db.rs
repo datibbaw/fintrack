@@ -11,7 +11,8 @@ pub fn open(path: &str) -> Result<Connection> {
 }
 
 fn migrate(conn: &Connection) -> Result<()> {
-    conn.execute_batch("
+    conn.execute_batch(
+        "
         CREATE TABLE IF NOT EXISTS accounts (
             id       INTEGER PRIMARY KEY AUTOINCREMENT,
             name     TEXT    NOT NULL,
@@ -54,7 +55,8 @@ fn migrate(conn: &Connection) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_tx_account  ON transactions(account_id);
         CREATE INDEX IF NOT EXISTS idx_tx_category ON transactions(category_id);
         CREATE INDEX IF NOT EXISTS idx_tx_hash     ON transactions(hash);
-    ")?;
+    ",
+    )?;
     Ok(())
 }
 
@@ -95,7 +97,13 @@ pub fn build_filters(
 
 // ── Accounts ─────────────────────────────────────────────────────────────────
 
-pub fn add_account(conn: &Connection, name: &str, number: &str, bank: &str, currency: &str) -> Result<i64> {
+pub fn add_account(
+    conn: &Connection,
+    name: &str,
+    number: &str,
+    bank: &str,
+    currency: &str,
+) -> Result<i64> {
     conn.execute(
         "INSERT INTO accounts (name, number, bank, currency) VALUES (?1, ?2, ?3, ?4)",
         params![name, number, bank, currency],
@@ -104,25 +112,26 @@ pub fn add_account(conn: &Connection, name: &str, number: &str, bank: &str, curr
 }
 
 pub fn list_accounts(conn: &Connection) -> Result<Vec<Account>> {
-    let mut stmt = conn.prepare(
-        "SELECT id, name, number, bank, currency FROM accounts ORDER BY id"
-    )?;
-    let rows = stmt.query_map([], |row| {
-        Ok(Account {
-            id: row.get(0)?,
-            name: row.get(1)?,
-            number: row.get(2)?,
-            bank: row.get(3)?,
-            currency: row.get(4)?,
-        })
-    })?.collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut stmt =
+        conn.prepare("SELECT id, name, number, bank, currency FROM accounts ORDER BY id")?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(Account {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                number: row.get(2)?,
+                bank: row.get(3)?,
+                currency: row.get(4)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
 }
 
 pub fn find_account(conn: &Connection, number_or_name: &str) -> Result<Option<Account>> {
     let mut stmt = conn.prepare(
         "SELECT id, name, number, bank, currency \
-         FROM accounts WHERE number = ?1 OR name = ?1 LIMIT 1"
+         FROM accounts WHERE number = ?1 OR name = ?1 LIMIT 1",
     )?;
     let mut rows = stmt.query(params![number_or_name])?;
     Ok(if let Some(row) = rows.next()? {
@@ -150,22 +159,23 @@ pub fn add_category(conn: &Connection, name: &str, parent_id: Option<i64>) -> Re
 
 pub fn list_categories(conn: &Connection) -> Result<Vec<Category>> {
     let mut stmt = conn.prepare(
-        "SELECT id, name, parent_id FROM categories ORDER BY parent_id NULLS FIRST, name"
+        "SELECT id, name, parent_id FROM categories ORDER BY parent_id NULLS FIRST, name",
     )?;
-    let rows = stmt.query_map([], |row| {
-        Ok(Category {
-            id: row.get(0)?,
-            name: row.get(1)?,
-            parent_id: row.get(2)?,
-        })
-    })?.collect::<rusqlite::Result<Vec<_>>>()?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(Category {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                parent_id: row.get(2)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
 }
 
 pub fn find_category(conn: &Connection, name: &str) -> Result<Option<Category>> {
-    let mut stmt = conn.prepare(
-        "SELECT id, name, parent_id FROM categories WHERE name = ?1 LIMIT 1"
-    )?;
+    let mut stmt =
+        conn.prepare("SELECT id, name, parent_id FROM categories WHERE name = ?1 LIMIT 1")?;
     let mut rows = stmt.query(params![name])?;
     Ok(if let Some(row) = rows.next()? {
         Some(Category {
@@ -178,7 +188,12 @@ pub fn find_category(conn: &Connection, name: &str) -> Result<Option<Category>> 
     })
 }
 
-pub fn update_category(conn: &Connection, id: i64, name: &str, parent_id: Option<i64>) -> Result<()> {
+pub fn update_category(
+    conn: &Connection,
+    id: i64,
+    name: &str,
+    parent_id: Option<i64>,
+) -> Result<()> {
     conn.execute(
         "UPDATE categories SET name = ?1, parent_id = ?2 WHERE id = ?3",
         params![name, parent_id, id],
@@ -193,7 +208,13 @@ pub fn remove_category(conn: &Connection, id: i64) -> Result<()> {
 
 // ── Rules ─────────────────────────────────────────────────────────────────────
 
-pub fn add_rule(conn: &Connection, category_id: i64, field: &str, pattern: &str, priority: i64) -> Result<i64> {
+pub fn add_rule(
+    conn: &Connection,
+    category_id: i64,
+    field: &str,
+    pattern: &str,
+    priority: i64,
+) -> Result<i64> {
     conn.execute(
         "INSERT INTO rules (category_id, field, pattern, priority) VALUES (?1, ?2, ?3, ?4)",
         params![category_id, field, pattern, priority],
@@ -204,17 +225,19 @@ pub fn add_rule(conn: &Connection, category_id: i64, field: &str, pattern: &str,
 pub fn list_rules_for_category(conn: &Connection, category_id: i64) -> Result<Vec<Rule>> {
     let mut stmt = conn.prepare(
         "SELECT id, category_id, field, pattern, priority \
-         FROM rules WHERE category_id = ?1 ORDER BY priority DESC, id"
+         FROM rules WHERE category_id = ?1 ORDER BY priority DESC, id",
     )?;
-    let rows = stmt.query_map(params![category_id], |row| {
-        Ok(Rule {
-            id: row.get(0)?,
-            category_id: row.get(1)?,
-            field: row.get(2)?,
-            pattern: row.get(3)?,
-            priority: row.get(4)?,
-        })
-    })?.collect::<rusqlite::Result<Vec<_>>>()?;
+    let rows = stmt
+        .query_map(params![category_id], |row| {
+            Ok(Rule {
+                id: row.get(0)?,
+                category_id: row.get(1)?,
+                field: row.get(2)?,
+                pattern: row.get(3)?,
+                priority: row.get(4)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
 }
 
@@ -224,7 +247,7 @@ pub fn list_rules(conn: &Connection, category_name: Option<&str>) -> Result<Vec<
         let mut stmt = conn.prepare(
             "SELECT r.id, r.category_id, r.field, r.pattern, r.priority, c.name \
              FROM rules r JOIN categories c ON r.category_id = c.id \
-             WHERE c.name = ?1 ORDER BY r.priority DESC, r.id"
+             WHERE c.name = ?1 ORDER BY r.priority DESC, r.id",
         )?;
         for row in stmt.query_map(params![cat], map_rule)? {
             out.push(row?);
@@ -233,7 +256,7 @@ pub fn list_rules(conn: &Connection, category_name: Option<&str>) -> Result<Vec<
         let mut stmt = conn.prepare(
             "SELECT r.id, r.category_id, r.field, r.pattern, r.priority, c.name \
              FROM rules r JOIN categories c ON r.category_id = c.id \
-             ORDER BY c.name, r.priority DESC, r.id"
+             ORDER BY c.name, r.priority DESC, r.id",
         )?;
         for row in stmt.query_map([], map_rule)? {
             out.push(row?);
@@ -288,19 +311,21 @@ pub fn all_rules_with_depth(conn: &Connection) -> Result<Vec<(Rule, bool)>> {
                 c.parent_id IS NOT NULL AS is_sub \
          FROM rules r \
          JOIN categories c ON r.category_id = c.id \
-         ORDER BY r.priority DESC, r.id"
+         ORDER BY r.priority DESC, r.id",
     )?;
-    let rows = stmt.query_map([], |row| {
-        Ok((
-            Rule {
-                id: row.get(0)?,
-                category_id: row.get(1)?,
-                field: row.get(2)?,
-                pattern: row.get(3)?,
-                priority: row.get(4)?,
-            },
-            row.get::<_, bool>(5)?,
-        ))
-    })?.collect::<rusqlite::Result<Vec<_>>>()?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                Rule {
+                    id: row.get(0)?,
+                    category_id: row.get(1)?,
+                    field: row.get(2)?,
+                    pattern: row.get(3)?,
+                    priority: row.get(4)?,
+                },
+                row.get::<_, bool>(5)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
 }

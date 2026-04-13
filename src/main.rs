@@ -212,20 +212,38 @@ fn main() -> Result<()> {
                     let mut table = Table::new();
                     table.set_header(["ID", "Name", "Number", "Bank", "Currency"]);
                     for a in &accounts {
-                        table.add_row([&a.id.to_string(), &a.name, &a.number, &a.bank, &a.currency]);
+                        table.add_row([
+                            &a.id.to_string(),
+                            &a.name,
+                            &a.number,
+                            &a.bank,
+                            &a.currency,
+                        ]);
                     }
                     println!("{table}");
                 }
             }
-            AccountCmd::Add { name, number, bank, currency } => {
+            AccountCmd::Add {
+                name,
+                number,
+                bank,
+                currency,
+            } => {
                 let id = db::add_account(&conn, &name, &number, &bank, &currency)?;
                 println!("Added account #{id}: {name} ({number})");
             }
         },
 
         // ── Import ────────────────────────────────────────────────────────────
-        Commands::Import { file, format, account, bank, currency } => {
-            let result = import::import_csv(&conn, &file, &format, account.as_deref(), &bank, &currency)?;
+        Commands::Import {
+            file,
+            format,
+            account,
+            bank,
+            currency,
+        } => {
+            let result =
+                import::import_csv(&conn, &file, &format, account.as_deref(), &bank, &currency)?;
             println!(
                 "Account : {} ({})\nImported: {}  |  Skipped (duplicates): {}",
                 result.account_name, result.account_number, result.imported, result.skipped,
@@ -246,7 +264,8 @@ fn main() -> Result<()> {
                     let mut table = Table::new();
                     table.set_header(["ID", "Name", "Parent"]);
                     for c in &cats {
-                        let parent = c.parent_id
+                        let parent = c
+                            .parent_id
                             .and_then(|pid| cats.iter().find(|p| p.id == pid))
                             .map(|p| p.name.as_str())
                             .unwrap_or("-");
@@ -276,47 +295,56 @@ fn main() -> Result<()> {
         },
 
         // ── Rules ─────────────────────────────────────────────────────────────
-        Commands::Rule(cmd) => match cmd {
-            RuleCmd::List { category } => {
-                let rules = db::list_rules(&conn, category.as_deref())?;
-                if rules.is_empty() {
-                    println!("No rules found.");
-                } else {
-                    let mut table = Table::new();
-                    table.set_header(["ID", "Category", "Field", "Pattern", "Priority"]);
-                    for (r, cat_name) in &rules {
-                        table.add_row([
-                            &r.id.to_string(),
-                            cat_name,
-                            &r.field,
-                            &r.pattern,
-                            &r.priority.to_string(),
-                        ]);
+        Commands::Rule(cmd) => {
+            match cmd {
+                RuleCmd::List { category } => {
+                    let rules = db::list_rules(&conn, category.as_deref())?;
+                    if rules.is_empty() {
+                        println!("No rules found.");
+                    } else {
+                        let mut table = Table::new();
+                        table.set_header(["ID", "Category", "Field", "Pattern", "Priority"]);
+                        for (r, cat_name) in &rules {
+                            table.add_row([
+                                &r.id.to_string(),
+                                cat_name,
+                                &r.field,
+                                &r.pattern,
+                                &r.priority.to_string(),
+                            ]);
+                        }
+                        println!("{table}");
                     }
-                    println!("{table}");
                 }
-            }
-            RuleCmd::Add { category, field, pattern, priority } => {
-                const VALID_FIELDS: &[&str] = &["description", "ref1", "ref2", "ref3", "code", "any"];
-                if !VALID_FIELDS.contains(&field.as_str()) {
-                    anyhow::bail!(
-                        "Invalid field '{}'. Must be one of: {}",
-                        field, VALID_FIELDS.join(", ")
-                    );
-                }
-                regex::Regex::new(&pattern)
-                    .map_err(|e| anyhow!("Invalid regex pattern '{pattern}': {e}"))?;
+                RuleCmd::Add {
+                    category,
+                    field,
+                    pattern,
+                    priority,
+                } => {
+                    const VALID_FIELDS: &[&str] =
+                        &["description", "ref1", "ref2", "ref3", "code", "any"];
+                    if !VALID_FIELDS.contains(&field.as_str()) {
+                        anyhow::bail!(
+                            "Invalid field '{}'. Must be one of: {}",
+                            field,
+                            VALID_FIELDS.join(", ")
+                        );
+                    }
+                    regex::Regex::new(&pattern)
+                        .map_err(|e| anyhow!("Invalid regex pattern '{pattern}': {e}"))?;
 
-                let cat = db::find_category(&conn, &category)?
-                    .ok_or_else(|| anyhow!("Category not found: '{category}'"))?;
-                let id = db::add_rule(&conn, cat.id, &field, &pattern, priority)?;
-                println!("Added rule #{id}: [{field}] =~ /{pattern}/ → {category} (priority {priority})");
+                    let cat = db::find_category(&conn, &category)?
+                        .ok_or_else(|| anyhow!("Category not found: '{category}'"))?;
+                    let id = db::add_rule(&conn, cat.id, &field, &pattern, priority)?;
+                    println!("Added rule #{id}: [{field}] =~ /{pattern}/ → {category} (priority {priority})");
+                }
+                RuleCmd::Remove { id } => {
+                    db::remove_rule(&conn, id)?;
+                    println!("Removed rule #{id}.");
+                }
             }
-            RuleCmd::Remove { id } => {
-                db::remove_rule(&conn, id)?;
-                println!("Removed rule #{id}.");
-            }
-        },
+        }
 
         // ── Transactions ──────────────────────────────────────────────────────
         Commands::Transaction(cmd) => match cmd {
@@ -325,7 +353,10 @@ fn main() -> Result<()> {
                     .ok_or_else(|| anyhow!("Account not found: '{account}'"))?;
                 let count = db::count_transactions_for_account(&conn, acc.id)?;
                 if count == 0 {
-                    println!("No transactions found for account '{}' ({}).", acc.name, acc.number);
+                    println!(
+                        "No transactions found for account '{}' ({}).",
+                        acc.name, acc.number
+                    );
                 } else {
                     println!(
                         "This will permanently delete {count} transaction(s) for account '{}' ({}).",
@@ -356,7 +387,13 @@ fn main() -> Result<()> {
             ReportCmd::Summary { from, to, account } => {
                 report::summary(&conn, from.as_deref(), to.as_deref(), account.as_deref())?;
             }
-            ReportCmd::Transactions { from, to, category, account, uncategorized } => {
+            ReportCmd::Transactions {
+                from,
+                to,
+                category,
+                account,
+                uncategorized,
+            } => {
                 report::transactions(
                     &conn,
                     from.as_deref(),
@@ -370,7 +407,6 @@ fn main() -> Result<()> {
 
         // Handled above before the DB connection is opened
         Commands::Server { .. } => unreachable!(),
-
     }
 
     Ok(())

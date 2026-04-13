@@ -15,14 +15,22 @@ struct CompiledRule {
     is_sub: bool,
 }
 
-fn matches(rule: &CompiledRule, code: &str, desc: &str, ref1: &str, ref2: &str, ref3: &str) -> bool {
+fn matches(
+    rule: &CompiledRule,
+    code: &str,
+    desc: &str,
+    ref1: &str,
+    ref2: &str,
+    ref3: &str,
+) -> bool {
     match rule.field.as_str() {
-        "code"        => rule.pattern.is_match(code),
+        "code" => rule.pattern.is_match(code),
         "description" => rule.pattern.is_match(desc),
-        "ref1"        => rule.pattern.is_match(ref1),
-        "ref2"        => rule.pattern.is_match(ref2),
-        "ref3"        => rule.pattern.is_match(ref3),
-        _             => { // "any" — search all text fields
+        "ref1" => rule.pattern.is_match(ref1),
+        "ref2" => rule.pattern.is_match(ref2),
+        "ref3" => rule.pattern.is_match(ref3),
+        _ => {
+            // "any" — search all text fields
             rule.pattern.is_match(code)
                 || rule.pattern.is_match(desc)
                 || rule.pattern.is_match(ref1)
@@ -40,19 +48,20 @@ pub fn apply_rules(conn: &Connection) -> Result<usize> {
 
     let rules: Vec<CompiledRule> = raw
         .into_iter()
-        .filter_map(|(r, is_sub)| {
-            match Regex::new(&r.pattern) {
-                Ok(re) => Some(CompiledRule {
-                    category_id: r.category_id,
-                    field: r.field,
-                    pattern: re,
-                    priority: r.priority,
-                    is_sub,
-                }),
-                Err(e) => {
-                    eprintln!("Warning: skipping rule #{} — invalid regex '{}': {e}", r.id, r.pattern);
-                    None
-                }
+        .filter_map(|(r, is_sub)| match Regex::new(&r.pattern) {
+            Ok(re) => Some(CompiledRule {
+                category_id: r.category_id,
+                field: r.field,
+                pattern: re,
+                priority: r.priority,
+                is_sub,
+            }),
+            Err(e) => {
+                eprintln!(
+                    "Warning: skipping rule #{} — invalid regex '{}': {e}",
+                    r.id, r.pattern
+                );
+                None
             }
         })
         .collect();
@@ -61,21 +70,29 @@ pub fn apply_rules(conn: &Connection) -> Result<usize> {
         return Ok(0);
     }
 
-    struct TxRow { id: i64, code: String, desc: String, ref1: String, ref2: String, ref3: String }
+    struct TxRow {
+        id: i64,
+        code: String,
+        desc: String,
+        ref1: String,
+        ref2: String,
+        ref3: String,
+    }
 
-    let mut stmt = conn.prepare(
-        "SELECT id, code, description, ref1, ref2, ref3 FROM transactions"
-    )?;
-    let txs: Vec<TxRow> = stmt.query_map([], |row| {
-        Ok(TxRow {
-            id:   row.get(0)?,
-            code: row.get(1)?,
-            desc: row.get(2)?,
-            ref1: row.get(3)?,
-            ref2: row.get(4)?,
-            ref3: row.get(5)?,
-        })
-    })?.collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut stmt =
+        conn.prepare("SELECT id, code, description, ref1, ref2, ref3 FROM transactions")?;
+    let txs: Vec<TxRow> = stmt
+        .query_map([], |row| {
+            Ok(TxRow {
+                id: row.get(0)?,
+                code: row.get(1)?,
+                desc: row.get(2)?,
+                ref1: row.get(3)?,
+                ref2: row.get(4)?,
+                ref3: row.get(5)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
 
     let mut categorized = 0usize;
 
@@ -83,7 +100,8 @@ pub fn apply_rules(conn: &Connection) -> Result<usize> {
         // Pick the best matching rule: highest priority wins; sub-category rules
         // beat parent catch-all rules of equal priority so the more specific
         // assignment always takes precedence.
-        let best = rules.iter()
+        let best = rules
+            .iter()
             .filter(|r| matches(r, &tx.code, &tx.desc, &tx.ref1, &tx.ref2, &tx.ref3))
             .max_by_key(|r| (r.priority, r.is_sub));
 

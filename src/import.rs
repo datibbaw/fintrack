@@ -20,11 +20,16 @@ fn parse_date(s: &str) -> Result<NaiveDate> {
 
 fn parse_amount(s: &str) -> Option<f64> {
     let s = s.trim();
-    if s.is_empty() { None } else { s.parse().ok() }
+    if s.is_empty() {
+        None
+    } else {
+        s.parse().ok()
+    }
 }
 
 /// Deterministic hash for deduplication. Includes account_id so two accounts
 /// can have identical-looking transactions without colliding.
+#[allow(clippy::too_many_arguments)]
 fn make_hash(
     account_id: i64,
     date: &str,
@@ -52,8 +57,7 @@ pub fn import_csv(
     bank: &str,
     currency_fallback: &str,
 ) -> Result<ImportResult> {
-    let content = fs::read_to_string(path)
-        .with_context(|| format!("cannot read file: {path}"))?;
+    let content = fs::read_to_string(path).with_context(|| format!("cannot read file: {path}"))?;
 
     let fmt = format::load(format_name)?;
     let parsed = format::apply(&fmt, &content)?;
@@ -68,8 +72,11 @@ pub fn import_csv(
 
     // Resolve account: prefer explicit hint, then auto-detect from CSV, then create.
     let account = if let Some(hint) = account_hint {
-        db::find_account(conn, hint)?
-            .ok_or_else(|| anyhow::anyhow!("account not found: '{hint}'. Add it first with `fintrack account add`."))?
+        db::find_account(conn, hint)?.ok_or_else(|| {
+            anyhow::anyhow!(
+                "account not found: '{hint}'. Add it first with `fintrack account add`."
+            )
+        })?
     } else if let Some(a) = db::find_account(conn, &csv_number)? {
         a
     } else {
@@ -94,14 +101,7 @@ pub fn import_csv(
         let credit = parse_amount(&row.credit);
 
         let hash = make_hash(
-            account.id,
-            &date_iso,
-            &row.code,
-            &row.ref1,
-            &row.ref2,
-            &row.ref3,
-            debit,
-            credit,
+            account.id, &date_iso, &row.code, &row.ref1, &row.ref2, &row.ref3, debit, credit,
         );
 
         // INSERT OR IGNORE — the UNIQUE constraint on `hash` silently discards duplicates.
@@ -110,13 +110,25 @@ pub fn import_csv(
              (account_id, date, code, description, ref1, ref2, ref3, status, debit, credit, hash) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
-                account.id, date_iso, row.code, row.description,
-                row.ref1, row.ref2, row.ref3, row.status,
-                debit, credit, hash
+                account.id,
+                date_iso,
+                row.code,
+                row.description,
+                row.ref1,
+                row.ref2,
+                row.ref3,
+                row.status,
+                debit,
+                credit,
+                hash
             ],
         )?;
 
-        if n == 1 { imported += 1; } else { skipped += 1; }
+        if n == 1 {
+            imported += 1;
+        } else {
+            skipped += 1;
+        }
     }
 
     Ok(ImportResult {
