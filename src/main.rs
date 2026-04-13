@@ -5,6 +5,7 @@ use std::io::{self, BufRead, Write};
 
 mod categorize;
 mod db;
+mod format;
 mod import;
 mod models;
 mod report;
@@ -38,13 +39,16 @@ enum Commands {
     Import {
         /// Path to the CSV file
         file: String,
-        /// Account number or name (auto-detected from DBS CSV if omitted)
+        /// CSV format name (must match a file in the built-in formats library)
+        #[arg(long, default_value = "dbs")]
+        format: String,
+        /// Account number or name (auto-detected from the CSV if omitted)
         #[arg(long)]
         account: Option<String>,
         /// Bank name, used only when auto-creating a new account
         #[arg(long, default_value = "DBS")]
         bank: String,
-        /// Currency, used only when auto-creating a new account
+        /// Currency fallback, used when the format cannot detect it from the CSV
         #[arg(long, default_value = "SGD")]
         currency: String,
     },
@@ -220,8 +224,8 @@ fn main() -> Result<()> {
         },
 
         // ── Import ────────────────────────────────────────────────────────────
-        Commands::Import { file, account, bank, currency } => {
-            let result = import::import_csv(&conn, &file, account.as_deref(), &bank, &currency)?;
+        Commands::Import { file, format, account, bank, currency } => {
+            let result = import::import_csv(&conn, &file, &format, account.as_deref(), &bank, &currency)?;
             println!(
                 "Account : {} ({})\nImported: {}  |  Skipped (duplicates): {}",
                 result.account_name, result.account_number, result.imported, result.skipped,

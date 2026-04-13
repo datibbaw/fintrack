@@ -1,0 +1,96 @@
+name: DBS
+
+# Extract the account from the header section.
+# Cell B1 contains e.g. "DBS Multiplier Account 000-00000-0".
+# The trailing number becomes the account number; the preceding text becomes the name.
+account:
+  - condition:
+      location: A1
+      expression: 'Account Details For'
+    value:
+      location: B1
+      expression: '(\d[\d-]+\d)$'
+
+# Extract the currency code from the header section.
+# Cell B4 contains e.g. "SGD - Singapore Dollar"; capture the first word.
+currency:
+    # 12-column format has an explicit "Currency:" row
+  - condition:
+      location: A4
+      expression: '^Currency:'
+    value:
+      location: B4
+      expression: '^(\w+)'
+    # 9-column format: extract from balance row (e.g. "SGD 2791.3")
+  - condition:
+      location: A4
+      expression: '^Available Balance:'
+    value:
+      location: B4
+      expression: '^(\w+)'
+
+# Two header layouts are tried in order; the first whose column expressions all
+# match the file is used.
+
+header:
+    # 12-column export: Statement Code / Supplementary Code style (row 9)
+  - row: 9
+    mappings:
+      - column: A
+        expression: '^Transaction Date$'
+        field: date
+      - column: C
+        expression: '^Statement Code$'
+        field: code
+      - column: D
+        expression: '^Description$'
+        field: description
+      - column: E
+        expression: '^Supplementary Code$'
+        field: ref1
+      - column: F
+        expression: '^Supplementary Code Description$'
+        field: ref2
+      - column: G
+        expression: '^Client Reference$'
+        field: ref3
+      - column: I
+        expression: '^Status$'
+        field: status
+      - column: K
+        expression: '^Debit Amount$'
+        field: debit
+      - column: L
+        expression: '^Credit Amount$'
+        field: credit
+
+    # 9-column export: Transaction Code / Transaction Ref style (row 7)
+  - row: 7
+    mappings:
+      - column: A
+        expression: '^Transaction Date$'
+        field: date
+      - column: B
+        expression: '^Transaction Code$'
+        field: code
+      - column: C
+        expression: '^Description$'
+        field: description
+      - column: D
+        expression: '^Transaction Ref1$'
+        field: ref1
+      - column: E
+        expression: '^Transaction Ref2$'
+        field: ref2
+      - column: F
+        expression: '^Transaction Ref3$'
+        field: ref3
+      - column: G
+        expression: '^Status$'
+        field: status
+      - column: H
+        expression: '^Debit Amount$'
+        field: debit
+      - column: I
+        expression: '^Credit Amount$'
+        field: credit
