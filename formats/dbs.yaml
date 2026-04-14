@@ -112,10 +112,10 @@ header:
         field: description
       - column: D
         expression: '^Transaction Type$'
-        field: code
+        field: ref1
       - column: E
         expression: '^Payment Type$'
-        field: ref1
+        field: ref2
       - column: F
         expression: '^Transaction Status$'
         field: status
