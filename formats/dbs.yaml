@@ -10,6 +10,12 @@ account:
     value:
       location: B1
       expression: '(\d[\d-]+\d)$'
+  - condition:
+      location: A1
+      expression: 'Card Transaction Details For'
+    value:
+      location: B1
+      expression: '(\d[\d-]+\d)$'
 
 # Extract the currency code from the header section.
 # Cell B4 contains e.g. "SGD - Singapore Dollar"; capture the first word.
@@ -92,5 +98,30 @@ header:
         expression: '^Debit Amount$'
         field: debit
       - column: I
+        expression: '^Credit Amount$'
+        field: credit
+
+  # 8-column export: Credit Card style (row 7)
+  - row: 7
+    mappings:
+      - column: A
+        expression: '^Transaction Date$'
+        field: date
+      - column: C
+        expression: '^Transaction Description$'
+        field: description
+      - column: D
+        expression: '^Transaction Type$'
+        field: code
+      - column: E
+        expression: '^Payment Type$'
+        field: ref1
+      - column: F
+        expression: '^Transaction Status$'
+        field: status
+      - column: G
+        expression: '^Debit Amount$'
+        field: debit
+      - column: H
         expression: '^Credit Amount$'
         field: credit
