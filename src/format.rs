@@ -2,10 +2,7 @@ use anyhow::{anyhow, bail, Result};
 use regex::Regex;
 use rust_embed::RustEmbed;
 use serde::Deserialize;
-use std::{
-    collections::{HashMap, HashSet},
-    hash::Hash,
-};
+use std::{collections::HashSet, hash::Hash};
 
 // ── Embedded format assets ─────────────────────────────────────────────────────
 
@@ -90,6 +87,29 @@ impl HeaderDef {
     fn fields(&self) -> Vec<Field> {
         self.mappings.iter().map(|m| m.field).collect()
     }
+
+    fn parse_row(&self, row: &[String]) -> Result<ParsedRow> {
+        let mut parsed = ParsedRow::default();
+        for m in &self.mappings {
+            let value = row
+                .get(m.index())
+                .map(|s| s.trim().to_string())
+                .unwrap_or_default();
+            let setter: fn(&mut ParsedRow, String) = match m.field {
+                Field::Date => |r, v| r.date = v,
+                Field::Code => |r, v| r.code = v,
+                Field::Description => |r, v| r.description = v,
+                Field::Ref1 => |r, v| r.ref1 = v,
+                Field::Ref2 => |r, v| r.ref2 = v,
+                Field::Ref3 => |r, v| r.ref3 = v,
+                Field::Status => |r, v| r.status = v,
+                Field::Debit => |r, v| r.debit = v,
+                Field::Credit => |r, v| r.credit = v,
+            };
+            setter(&mut parsed, value);
+        }
+        Ok(parsed)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -129,6 +149,7 @@ pub struct ParsedCsv {
     pub rows: Vec<ParsedRow>,
 }
 
+#[derive(Default)]
 pub struct ParsedRow {
     pub date: String,
     pub code: String,
@@ -325,38 +346,11 @@ pub fn apply(fmt: &Format, content: &str) -> Result<ParsedCsv> {
             )
         })?;
 
-    let mut field_col: HashMap<Field, usize> = HashMap::new();
-    for m in &hdr.mappings {
-        field_col.insert(m.field, m.index());
-    }
-
-    // Extract data rows
-    let get_field = |row: &Vec<String>, field: Field| -> String {
-        field_col
-            .get(&field)
-            .and_then(|&col| row.get(col))
-            .map(|s| s.trim().to_string())
-            .unwrap_or_default()
-    };
-
-    let mut rows = Vec::new();
-    for row in grid.iter().skip(hdr.row) {
-        let date = get_field(row, Field::Date);
-        if date.is_empty() {
-            continue;
-        }
-        rows.push(ParsedRow {
-            date,
-            code: get_field(row, Field::Code),
-            description: get_field(row, Field::Description),
-            ref1: get_field(row, Field::Ref1),
-            ref2: get_field(row, Field::Ref2),
-            ref3: get_field(row, Field::Ref3),
-            status: get_field(row, Field::Status),
-            debit: get_field(row, Field::Debit),
-            credit: get_field(row, Field::Credit),
-        });
-    }
+    let rows = grid
+        .iter()
+        .skip(hdr.row)
+        .filter_map(|row| hdr.parse_row(row).ok())
+        .collect();
 
     Ok(ParsedCsv {
         account_number,
