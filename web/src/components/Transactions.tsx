@@ -128,7 +128,6 @@ export function Transactions({ categories }: Props) {
                       <th class="col-category">Category</th>
                       <th class="col-number">Debit</th>
                       <th class="col-number">Credit</th>
-                      <th class="col-account">Account</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -199,7 +198,6 @@ function TxRow({ tx }: { tx: Transaction }) {
       </td>
       <td class="col-number mono debit-value">{tx.debit != null ? fmt(tx.debit) : ''}</td>
       <td class="col-number mono credit-value">{tx.credit != null ? fmt(tx.credit) : ''}</td>
-      <td class="col-account text-muted">{tx.account}</td>
     </tr>
   )
 }
