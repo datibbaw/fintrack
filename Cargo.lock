@@ -440,6 +440,7 @@ dependencies = [
  "csv",
  "hex",
  "mime_guess",
+ "qif_parser",
  "regex",
  "rusqlite",
  "rust-embed",
@@ -908,6 +909,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8fd00f0bb2e90d81d1044c2b32617f68fcb9fa3bb7640c23e9c748e53fb30934"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "qif_parser"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "68ad4bd8fbfa41de3b1b4a2424ee88553c62d6392280afc8216e1039635f0cd4"
+dependencies = [
+ "chrono",
+ "serde",
 ]
 
 [[package]]

@@ -8,6 +8,7 @@ mod db;
 mod format;
 mod import;
 mod models;
+mod qif;
 mod report;
 mod server;
 
@@ -242,8 +243,11 @@ fn main() -> Result<()> {
             bank,
             currency,
         } => {
-            let result =
-                import::import_csv(&conn, &file, &format, account.as_deref(), &bank, &currency)?;
+            let result = if file.to_ascii_lowercase().ends_with(".qif") {
+                import::import_qif(&conn, &file, account.as_deref())?
+            } else {
+                import::import_csv(&conn, &file, &format, account.as_deref(), &bank, &currency)?
+            };
             println!(
                 "Account : {} ({})\nImported: {}  |  Skipped (duplicates): {}",
                 result.account_name, result.account_number, result.imported, result.skipped,
