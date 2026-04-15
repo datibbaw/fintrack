@@ -2,10 +2,10 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::anyhow;
 use axum::{
-    extract::{Path, Query, State},
+    extract::{DefaultBodyLimit, Multipart, Path, Query, State},
     http::{header, StatusCode, Uri},
     response::{IntoResponse, Response},
-    routing::{get, put},
+    routing::{get, post, put},
     Json, Router,
 };
 use rust_embed::RustEmbed;
@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use serde_rusqlite::from_rows;
 
-use crate::{db, models::Account};
+use crate::{categorize, db, import, models::Account};
 
 // ── Embedded web assets ───────────────────────────────────────────────────────
 
@@ -27,17 +27,23 @@ type Db = Arc<Mutex<rusqlite::Connection>>;
 
 // ── Error type ────────────────────────────────────────────────────────────────
 
-struct ApiError(anyhow::Error);
+struct ApiError(StatusCode, anyhow::Error);
+
+impl ApiError {
+    fn bad_request(msg: impl Into<anyhow::Error>) -> Self {
+        ApiError(StatusCode::BAD_REQUEST, msg.into())
+    }
+}
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        (StatusCode::INTERNAL_SERVER_ERROR, self.0.to_string()).into_response()
+        (self.0, self.1.to_string()).into_response()
     }
 }
 
 impl<E: Into<anyhow::Error>> From<E> for ApiError {
     fn from(e: E) -> Self {
-        ApiError(e.into())
+        ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.into())
     }
 }
 
@@ -438,6 +444,78 @@ async fn api_transactions(
     Ok(Json(result))
 }
 
+// ── Import handler ────────────────────────────────────────────────────────────
+
+#[derive(Serialize)]
+pub struct ImportResultDto {
+    pub imported: usize,
+    pub skipped: usize,
+    pub account_name: String,
+    pub account_number: String,
+    pub auto_categorized: usize,
+}
+
+async fn api_import(
+    State(db): State<Db>,
+    mut multipart: Multipart,
+) -> Result<Json<ImportResultDto>, ApiError> {
+    let mut file_bytes: Option<Vec<u8>> = None;
+    let mut filename = String::from("upload");
+    let mut account: Option<String> = None;
+
+    while let Some(field) = multipart.next_field().await? {
+        match field.name() {
+            Some("file") => {
+                if let Some(name) = field.file_name() {
+                    filename = name.to_string();
+                }
+                file_bytes = Some(field.bytes().await?.to_vec());
+            }
+            Some("account") => {
+                let v = field.text().await?;
+                if !v.is_empty() {
+                    account = Some(v);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let bytes = file_bytes
+        .ok_or_else(|| ApiError::bad_request(anyhow!("no file field in request")))?;
+
+    let account = account
+        .ok_or_else(|| ApiError::bad_request(anyhow!("no account field in request")))?;
+
+    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
+        let conn = db.lock().map_err(|_| anyhow!("db lock poisoned"))?;
+        let result = import::import_upload(
+            &conn,
+            &bytes,
+            &filename,
+            Some(account.as_str()),
+            "DBS",
+            "SGD",
+        )?;
+        let auto_categorized = if result.imported > 0 {
+            categorize::apply_rules(&conn)?
+        } else {
+            0
+        };
+        Ok(ImportResultDto {
+            imported: result.imported,
+            skipped: result.skipped,
+            account_name: result.account_name,
+            account_number: result.account_number,
+            auto_categorized,
+        })
+    })
+    .await
+    .map_err(|e| anyhow!("thread error: {e}"))??;
+
+    Ok(Json(result))
+}
+
 // ── Static file handler ───────────────────────────────────────────────────────
 
 async fn static_handler(uri: Uri) -> Response {
@@ -480,7 +558,8 @@ pub async fn serve(db_path: &str, port: u16, open: bool) -> anyhow::Result<()> {
         )
         .route("/categories/:id/rules", get(api_category_rules))
         .route("/summary", get(api_summary))
-        .route("/transactions", get(api_transactions));
+        .route("/transactions", get(api_transactions))
+        .route("/import", post(api_import).layer(DefaultBodyLimit::max(2 * 1024 * 1024)));
 
     let app = Router::new()
         .nest("/api", api)

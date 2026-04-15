@@ -64,9 +64,51 @@ pub fn import_csv(
     currency_fallback: &str,
 ) -> Result<ImportResult> {
     let content = fs::read_to_string(path).with_context(|| format!("cannot read file: {path}"))?;
+    import_csv_content(conn, &content, format_name, account_hint, bank, currency_fallback, path)
+}
 
+pub fn import_qif(
+    conn: &Connection,
+    path: &str,
+    account_hint: Option<&str>,
+) -> Result<ImportResult> {
+    let content = fs::read_to_string(path).with_context(|| format!("cannot read file: {path}"))?;
+    import_qif_content(conn, &content, account_hint)
+}
+
+/// Import bytes uploaded via the web UI. Format is detected from `filename`.
+/// CSV files use the "dbs" format. QIF files require `account_hint`.
+pub fn import_upload(
+    conn: &Connection,
+    bytes: &[u8],
+    filename: &str,
+    account_hint: Option<&str>,
+    bank: &str,
+    currency_fallback: &str,
+) -> Result<ImportResult> {
+    let content = std::str::from_utf8(bytes)
+        .with_context(|| "uploaded file is not valid UTF-8")?;
+    if std::path::Path::new(filename)
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("qif"))
+    {
+        import_qif_content(conn, content, account_hint)
+    } else {
+        import_csv_content(conn, content, "dbs", account_hint, bank, currency_fallback, filename)
+    }
+}
+
+fn import_csv_content(
+    conn: &Connection,
+    content: &str,
+    format_name: &str,
+    account_hint: Option<&str>,
+    bank: &str,
+    currency_fallback: &str,
+    source: &str,
+) -> Result<ImportResult> {
     let fmt = format::load(format_name)?;
-    let parsed = format::apply(&fmt, &content)?;
+    let parsed = format::apply(&fmt, content)?;
 
     let file_number = parsed.account_number.unwrap_or_default();
     let file_name = parsed.account_name.unwrap_or_default();
@@ -78,17 +120,27 @@ pub fn import_csv(
 
     // Resolve account: prefer explicit hint, then auto-detect from CSV, then create.
     let account = if let Some(hint) = account_hint {
-        db::find_account(conn, hint)?.ok_or_else(|| {
+        let account = db::find_account(conn, hint)?.ok_or_else(|| {
             anyhow::anyhow!(
                 "account not found: '{hint}'. Add it first with `fintrack account add`."
             )
-        })?
+        })?;
+        // If the CSV identifies a specific account, make sure it matches what
+        // was requested. A mismatch means the wrong file was dropped/specified.
+        if !file_number.is_empty() && account.number != file_number {
+            anyhow::bail!(
+                "account mismatch: file belongs to account '{file_name}' ({file_number}) \
+                 but '{}' ({}) was selected",
+                account.name, account.number
+            );
+        }
+        account
     } else if let Some(a) = db::find_account(conn, &file_number)? {
         a
     } else {
         if file_number.is_empty() {
             anyhow::bail!(
-                "the '{format_name}' format could not detect an account number in '{path}'. \
+                "the '{format_name}' format could not detect an account number in '{source}'. \
                  Specify one with --account."
             );
         }
@@ -100,13 +152,12 @@ pub fn import_csv(
     insert_rows(conn, &parsed.rows, account.id, &account.name, &account.number)
 }
 
-pub fn import_qif(
+fn import_qif_content(
     conn: &Connection,
-    path: &str,
+    content: &str,
     account_hint: Option<&str>,
 ) -> Result<ImportResult> {
-    let content = fs::read_to_string(path).with_context(|| format!("cannot read file: {path}"))?;
-    let parsed = qif::parse(&content)?;
+    let parsed = qif::parse(content)?;
 
     // QIF files carry no account information — the caller must supply --account.
     let hint = account_hint.ok_or_else(|| {
@@ -390,6 +441,48 @@ mod tests {
             .unwrap();
         assert_eq!(debit, None);
         assert_eq!(credit, Some(39.0));
+    }
+
+    // ── import_upload dispatch ────────────────────────────────────────────────
+
+    #[test]
+    fn import_upload_dispatches_qif_by_extension() {
+        let (_dir, conn) = tmp_conn();
+        let bytes = include_bytes!("../tests/fixtures/qif_ccard.qif");
+        db::add_account(&conn, "My Card", "541", "DBS", "SGD").unwrap();
+
+        let result = import_upload(&conn, bytes, "statement.QIF", Some("541"), "DBS", "SGD").unwrap();
+        assert_eq!(result.imported, 4);
+        assert_eq!(result.account_number, "541");
+    }
+
+    #[test]
+    fn import_upload_dispatches_csv_by_extension() {
+        let (_dir, conn) = tmp_conn();
+        let bytes = include_bytes!("../tests/fixtures/dbs_9col.csv");
+
+        let result = import_upload(&conn, bytes, "export.CSV", None, "DBS", "SGD").unwrap();
+        assert_eq!(result.imported, 4);
+        assert_eq!(result.account_number, "000-11111-1");
+    }
+
+    #[test]
+    fn import_csv_account_mismatch_errors() {
+        let (_dir, conn) = tmp_conn();
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/dbs_9col.csv");
+        // The CSV belongs to "000-11111-1"; pass a different account number.
+        db::add_account(&conn, "Other Account", "999-99999-9", "DBS", "SGD").unwrap();
+        let err = import_csv(&conn, path, "dbs", Some("999-99999-9"), "DBS", "SGD").unwrap_err();
+        assert!(err.to_string().contains("mismatch"));
+    }
+
+    #[test]
+    fn import_upload_qif_missing_account_errors() {
+        let (_dir, conn) = tmp_conn();
+        let bytes = include_bytes!("../tests/fixtures/qif_ccard.qif");
+
+        let err = import_upload(&conn, bytes, "statement.qif", None, "DBS", "SGD").unwrap_err();
+        assert!(err.to_string().to_lowercase().contains("account"));
     }
 
     #[test]

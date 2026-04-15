@@ -1,4 +1,4 @@
-import type { Account, Category, Rule, SummaryResponse, TransactionsResponse } from './types'
+import type { Account, Category, ImportResult, Rule, SummaryResponse, TransactionsResponse } from './types'
 
 async function get<T>(path: string, params?: Record<string, string>): Promise<T> {
   const url = new URL(path, window.location.href)
@@ -66,6 +66,17 @@ export const api = {
       to: params.to ?? '',
       account: params.account ?? '',
     })
+  },
+
+  importFile(file: File, account?: string): Promise<ImportResult> {
+    const form = new FormData()
+    form.append('file', file, file.name)
+    if (account) form.append('account', account)
+    return fetch('/api/import', { method: 'POST', body: form })
+      .then(async res => {
+        if (!res.ok) throw new Error(await res.text())
+        return res.json()
+      })
   },
 
   transactions(params: {

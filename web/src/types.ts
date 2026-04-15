@@ -68,3 +68,11 @@ export interface Filters {
   to: string
   account: string
 }
+
+export interface ImportResult {
+  imported: number
+  skipped: number
+  account_name: string
+  account_number: string
+  auto_categorized: number
+}
