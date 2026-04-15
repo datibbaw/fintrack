@@ -36,20 +36,20 @@ enum Commands {
     #[command(subcommand)]
     Account(AccountCmd),
 
-    /// Import transactions from a CSV export
+    /// Import transactions from a CSV or QIF file
     Import {
-        /// Path to the CSV file
+        /// Path to the file to import (.csv or .qif)
         file: String,
-        /// CSV format name (must match a file in the built-in formats library)
+        /// CSV format name — ignored for .qif files (must match a built-in format for CSV)
         #[arg(long, default_value = "dbs")]
         format: String,
-        /// Account number or name (auto-detected from the CSV if omitted)
+        /// Account number or name; required for .qif files (auto-detected from CSV if omitted)
         #[arg(long)]
         account: Option<String>,
-        /// Bank name, used only when auto-creating a new account
+        /// Bank name, used only when auto-creating a new account from a CSV
         #[arg(long, default_value = "DBS")]
         bank: String,
-        /// Currency fallback, used when the format cannot detect it from the CSV
+        /// Currency fallback, used when the CSV format cannot detect it
         #[arg(long, default_value = "SGD")]
         currency: String,
     },
@@ -243,7 +243,10 @@ fn main() -> Result<()> {
             bank,
             currency,
         } => {
-            let result = if file.to_ascii_lowercase().ends_with(".qif") {
+            let result = if std::path::Path::new(&file)
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("qif"))
+            {
                 import::import_qif(&conn, &file, account.as_deref())?
             } else {
                 import::import_csv(&conn, &file, &format, account.as_deref(), &bank, &currency)?
