@@ -1,5 +1,6 @@
 use anyhow::Result;
 use rusqlite::{params, Connection};
+use serde_rusqlite::{from_row, from_rows};
 
 use crate::models::{Account, Category, Rule};
 
@@ -114,17 +115,8 @@ pub fn add_account(
 pub fn list_accounts(conn: &Connection) -> Result<Vec<Account>> {
     let mut stmt =
         conn.prepare("SELECT id, name, number, bank, currency FROM accounts ORDER BY id")?;
-    let rows = stmt
-        .query_map([], |row| {
-            Ok(Account {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                number: row.get(2)?,
-                bank: row.get(3)?,
-                currency: row.get(4)?,
-            })
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let rows = from_rows::<Account>(stmt.query([])?)
+        .collect::<serde_rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
 }
 
@@ -134,16 +126,9 @@ pub fn find_account(conn: &Connection, number_or_name: &str) -> Result<Option<Ac
          FROM accounts WHERE number = ?1 OR name = ?1 LIMIT 1",
     )?;
     let mut rows = stmt.query(params![number_or_name])?;
-    Ok(if let Some(row) = rows.next()? {
-        Some(Account {
-            id: row.get(0)?,
-            name: row.get(1)?,
-            number: row.get(2)?,
-            bank: row.get(3)?,
-            currency: row.get(4)?,
-        })
-    } else {
-        None
+    Ok(match rows.next()? {
+        Some(row) => Some(from_row::<Account>(row)?),
+        None => None,
     })
 }
 
@@ -161,15 +146,8 @@ pub fn list_categories(conn: &Connection) -> Result<Vec<Category>> {
     let mut stmt = conn.prepare(
         "SELECT id, name, parent_id FROM categories ORDER BY parent_id NULLS FIRST, name",
     )?;
-    let rows = stmt
-        .query_map([], |row| {
-            Ok(Category {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                parent_id: row.get(2)?,
-            })
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let rows = from_rows::<Category>(stmt.query([])?)
+        .collect::<serde_rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
 }
 
@@ -177,14 +155,9 @@ pub fn find_category(conn: &Connection, name: &str) -> Result<Option<Category>> 
     let mut stmt =
         conn.prepare("SELECT id, name, parent_id FROM categories WHERE name = ?1 LIMIT 1")?;
     let mut rows = stmt.query(params![name])?;
-    Ok(if let Some(row) = rows.next()? {
-        Some(Category {
-            id: row.get(0)?,
-            name: row.get(1)?,
-            parent_id: row.get(2)?,
-        })
-    } else {
-        None
+    Ok(match rows.next()? {
+        Some(row) => Some(from_row::<Category>(row)?),
+        None => None,
     })
 }
 
@@ -227,17 +200,8 @@ pub fn list_rules_for_category(conn: &Connection, category_id: i64) -> Result<Ve
         "SELECT id, category_id, field, pattern, priority \
          FROM rules WHERE category_id = ?1 ORDER BY priority DESC, id",
     )?;
-    let rows = stmt
-        .query_map(params![category_id], |row| {
-            Ok(Rule {
-                id: row.get(0)?,
-                category_id: row.get(1)?,
-                field: row.get(2)?,
-                pattern: row.get(3)?,
-                priority: row.get(4)?,
-            })
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let rows = from_rows::<Rule>(stmt.query(params![category_id])?)
+        .collect::<serde_rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
 }
 

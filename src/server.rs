@@ -11,6 +11,8 @@ use axum::{
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
 
+use serde_rusqlite::from_rows;
+
 use crate::{db, models::Account};
 
 // ── Embedded web assets ───────────────────────────────────────────────────────
@@ -41,7 +43,7 @@ impl<E: Into<anyhow::Error>> From<E> for ApiError {
 
 // ── Response types ────────────────────────────────────────────────────────────
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct CategoryDto {
     pub id: i64,
     pub name: String,
@@ -60,7 +62,7 @@ pub struct RuleDto {
     pub priority: i64,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct SummaryRow {
     pub category: String,
     pub category_id: Option<i64>,
@@ -80,7 +82,7 @@ pub struct SummaryResponse {
     pub total_net: f64,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct TransactionDto {
     pub id: i64,
     pub date: String,
@@ -175,12 +177,13 @@ fn query_summary(
     // Top-level and uncategorised transactions contribute to only one bucket.
     // Grand totals are computed above from raw transactions to avoid double-counting.
     let sql = format!(
-        "SELECT sub.cat_id, \
+        "SELECT sub.cat_id AS category_id, \
                 COALESCE(c.name, 'Uncategorized') AS category, \
                 c.parent_id, p.name AS parent, \
-                SUM(sub.d)   AS total_debit, \
-                SUM(sub.cr)  AS total_credit, \
-                SUM(sub.cnt) AS tx_count \
+                SUM(sub.d)                    AS debit, \
+                SUM(sub.cr)                   AS credit, \
+                SUM(sub.cr) - SUM(sub.d)      AS net, \
+                SUM(sub.cnt)                  AS count \
          FROM ( \
            SELECT t.category_id AS cat_id, \
                   COALESCE(t.debit,0)  AS d, \
@@ -202,7 +205,7 @@ fn query_summary(
          LEFT JOIN categories c ON sub.cat_id = c.id \
          LEFT JOIN categories p ON c.parent_id = p.id \
          GROUP BY sub.cat_id \
-         ORDER BY ABS(SUM(sub.cr) - SUM(sub.d)) DESC"
+         ORDER BY ABS(net) DESC"
     );
 
     // filter vals are used in both sub-queries of the UNION ALL.
@@ -210,22 +213,10 @@ fn query_summary(
     double_vals.extend(vals.iter().cloned());
 
     let mut stmt = conn.prepare(&sql)?;
-    let summary_rows = stmt
-        .query_map(rusqlite::params_from_iter(double_vals.iter()), |row| {
-            let debit: f64 = row.get(4)?;
-            let credit: f64 = row.get(5)?;
-            Ok(SummaryRow {
-                category_id: row.get(0)?,
-                category: row.get(1)?,
-                parent_id: row.get(2)?,
-                parent: row.get(3)?,
-                debit,
-                credit,
-                net: credit - debit,
-                count: row.get(6)?,
-            })
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let summary_rows = from_rows::<SummaryRow>(
+        stmt.query(rusqlite::params_from_iter(double_vals.iter()))?,
+    )
+    .collect::<serde_rusqlite::Result<Vec<_>>>()?;
 
     Ok(SummaryResponse {
         rows: summary_rows,
@@ -284,26 +275,10 @@ fn query_transactions(
     );
 
     let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt
-        .query_map(rusqlite::params_from_iter(paginated_vals.iter()), |row| {
-            Ok(TransactionDto {
-                id: row.get(0)?,
-                date: row.get(1)?,
-                code: row.get(2)?,
-                description: row.get(3)?,
-                ref1: row.get(4)?,
-                ref2: row.get(5)?,
-                ref3: row.get(6)?,
-                status: row.get(7)?,
-                debit: row.get(8)?,
-                credit: row.get(9)?,
-                category: row.get(10)?,
-                category_id: row.get(11)?,
-                account: row.get(12)?,
-                account_id: row.get(13)?,
-            })
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let rows = from_rows::<TransactionDto>(
+        stmt.query(rusqlite::params_from_iter(paginated_vals.iter()))?,
+    )
+    .collect::<serde_rusqlite::Result<Vec<_>>>()?;
 
     Ok(TransactionsResponse { rows, total })
 }
@@ -322,18 +297,8 @@ fn query_categories(conn: &rusqlite::Connection) -> anyhow::Result<Vec<CategoryD
          GROUP BY c.id \
          ORDER BY c.parent_id NULLS FIRST, c.name",
     )?;
-    let rows = stmt
-        .query_map([], |row| {
-            Ok(CategoryDto {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                parent_id: row.get(2)?,
-                parent: row.get(3)?,
-                transaction_count: row.get(4)?,
-                rule_count: row.get(5)?,
-            })
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let rows = from_rows::<CategoryDto>(stmt.query([])?)
+        .collect::<serde_rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
 }
 

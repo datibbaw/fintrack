@@ -1,5 +1,5 @@
 /// A bank account tracked in the system.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Account {
     pub id: i64,
     pub name: String,
@@ -9,7 +9,7 @@ pub struct Account {
 }
 
 /// A spending / income category (optionally nested under a parent).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Deserialize)]
 pub struct Category {
     pub id: i64,
     pub name: String,
@@ -18,7 +18,7 @@ pub struct Category {
 
 /// A categorization rule: when `field` matches `pattern` (regex), assign `category_id`.
 /// Higher `priority` wins when multiple rules match.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Deserialize)]
 pub struct Rule {
     pub id: i64,
     pub category_id: i64,
