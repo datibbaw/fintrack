@@ -378,7 +378,76 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 
 /* ── Transactions ──────────────────────────────────────────────────────────── */
 
-.transactions { display: flex; flex-direction: column; gap: 1rem; }
+.transactions { display: flex; flex-direction: column; gap: 1rem; position: relative; }
+
+/* ── File drop zone ────────────────────────────────────────────────────────── */
+
+.drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--accent-light) 92%, transparent);
+  border: 2px dashed var(--accent);
+  border-radius: var(--radius);
+  pointer-events: none;
+}
+
+.drop-overlay-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .5rem;
+  color: var(--accent);
+}
+
+.drop-icon {
+  width: 2.5rem;
+  height: 2.5rem;
+  opacity: .8;
+}
+
+.drop-label {
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.drop-account {
+  font-size: .85rem;
+  opacity: .75;
+}
+
+/* ── Import result banner ──────────────────────────────────────────────────── */
+
+.import-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  padding: .5rem .875rem;
+  border-radius: var(--radius);
+  font-size: .85rem;
+  font-weight: 500;
+}
+
+.import-banner--ok      { background: var(--credit-light); color: var(--credit); }
+.import-banner--error   { background: var(--debit-light);  color: var(--debit);  }
+.import-banner--pending { background: var(--accent-light); color: var(--accent); }
+
+.import-banner-dismiss {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: .8rem;
+  opacity: .6;
+  padding: 0 .2rem;
+  color: inherit;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.import-banner-dismiss:hover { opacity: 1; }
 
 .tx-controls {
   display: flex;

@@ -1,5 +1,5 @@
-import { signal, effect, computed } from '@preact/signals'
-import type { Category, Transaction, TransactionsResponse } from '../types'
+import { signal, effect, computed, useSignal } from '@preact/signals'
+import type { Category, ImportResult, Transaction, TransactionsResponse } from '../types'
 import { filterFrom, filterTo, filterAccount, categoryFilter, uncategorized } from '../store'
 import { api } from '../api'
 
@@ -14,6 +14,7 @@ const loading = signal(false)
 const error   = signal<string | null>(null)
 const page    = signal(0)
 const search  = signal('')
+const refresh = signal(0)  // increment to force a refetch after import
 
 // Reset page when filters change
 effect(() => {
@@ -30,6 +31,7 @@ effect(() => {
   const account = filterAccount.value
   const cat     = uncategorized.value ? '' : categoryFilter.value
   const offset  = page.value * PAGE_SIZE
+  refresh.value // track for post-import refetch
 
   loading.value = true
   error.value   = null
@@ -70,8 +72,86 @@ export function Transactions({ categories }: Props) {
   const total = d?.total ?? 0
   const pages = Math.ceil(total / PAGE_SIZE)
 
+  const dragOver      = useSignal(false)
+  const importing     = useSignal(false)
+  const importResult  = useSignal<ImportResult | null>(null)
+  const importError   = useSignal<string | null>(null)
+
+  function handleDragOver(e: DragEvent) {
+    if (!e.dataTransfer?.types.includes('Files')) return
+    e.preventDefault()
+    dragOver.value = true
+  }
+
+  function handleDragLeave(e: DragEvent) {
+    if (!(e.currentTarget as Element).contains(e.relatedTarget as Node)) {
+      dragOver.value = false
+    }
+  }
+
+  async function handleDrop(e: DragEvent) {
+    e.preventDefault()
+    dragOver.value = false
+    const file = e.dataTransfer?.files[0]
+    if (!file) return
+    await runImport(file)
+  }
+
+  async function runImport(file: File) {
+    importing.value    = true
+    importResult.value = null
+    importError.value  = null
+    const account = filterAccount.value || undefined
+    try {
+      importResult.value = await api.importFile(file, account)
+      refresh.value++
+    } catch (err) {
+      importError.value = String(err).replace(/^Error:\s*/, '')
+    } finally {
+      importing.value = false
+    }
+  }
+
   return (
-    <div class="transactions">
+    <div
+      class="transactions"
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      {dragOver.value && (
+        <div class="drop-overlay">
+          <div class="drop-overlay-inner">
+            <svg class="drop-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path stroke-linecap="round" stroke-linejoin="round"
+                d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+            </svg>
+            <span class="drop-label">Drop CSV or QIF to import</span>
+            {filterAccount.value
+              ? <span class="drop-account">into <strong>{filterAccount.value}</strong></span>
+              : <span class="drop-account">account auto-detected from file</span>
+            }
+          </div>
+        </div>
+      )}
+
+      {(importResult.value || importError.value || importing.value) && (
+        <div class={`import-banner ${importError.value ? 'import-banner--error' : importing.value ? 'import-banner--pending' : 'import-banner--ok'}`}>
+          {importing.value && 'Importing…'}
+          {importResult.value && (() => {
+            const r = importResult.value!
+            const parts = [`Imported ${r.imported}`]
+            if (r.skipped > 0) parts.push(`${r.skipped} duplicate${r.skipped !== 1 ? 's' : ''} skipped`)
+            if (r.auto_categorized > 0) parts.push(`${r.auto_categorized} auto-categorized`)
+            return `${parts.join(' · ')} — ${r.account_name}`
+          })()}
+          {importError.value && `Import failed: ${importError.value}`}
+          {!importing.value && (
+            <button type="button" aria-label="Dismiss" class="import-banner-dismiss" onClick={() => { importResult.value = null; importError.value = null }}>✕</button>
+          )}
+        </div>
+      )}
+
       <div class="tx-controls">
         <input
           type="search"
