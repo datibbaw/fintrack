@@ -132,6 +132,12 @@ pub fn find_account(conn: &Connection, number_or_name: &str) -> Result<Option<Ac
     })
 }
 
+pub fn remove_account(conn: &Connection, id: i64) -> Result<()> {
+    conn.execute("DELETE FROM transactions WHERE account_id = ?1", params![id])?;
+    conn.execute("DELETE FROM accounts WHERE id = ?1", params![id])?;
+    Ok(())
+}
+
 // ── Categories ────────────────────────────────────────────────────────────────
 
 pub fn add_category(conn: &Connection, name: &str, parent_id: Option<i64>) -> Result<i64> {

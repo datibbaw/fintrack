@@ -98,6 +98,11 @@ enum AccountCmd {
         #[arg(long, default_value = "SGD")]
         currency: String,
     },
+    /// Remove an account and all its transactions
+    Remove {
+        /// Account name or number
+        account: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -231,6 +236,25 @@ fn main() -> Result<()> {
             } => {
                 let id = db::add_account(&conn, &name, &number, &bank, &currency)?;
                 println!("Added account #{id}: {name} ({number})");
+            }
+            AccountCmd::Remove { account } => {
+                let acc = db::find_account(&conn, &account)?
+                    .ok_or_else(|| anyhow!("Account not found: '{account}'"))?;
+                let tx_count = db::count_transactions_for_account(&conn, acc.id)?;
+                println!(
+                    "This will permanently delete account '{}' ({}) and its {tx_count} transaction(s).",
+                    acc.name, acc.number
+                );
+                print!("Confirm? [y/N] ");
+                io::stdout().flush()?;
+                let mut line = String::new();
+                io::stdin().lock().read_line(&mut line)?;
+                if line.trim().eq_ignore_ascii_case("y") {
+                    db::remove_account(&conn, acc.id)?;
+                    println!("Removed account '{}' ({}) and {tx_count} transaction(s).", acc.name, acc.number);
+                } else {
+                    println!("Aborted.");
+                }
             }
         },
 
