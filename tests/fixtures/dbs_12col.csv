@@ -1,0 +1,12 @@
+"Account Details For:","Test Multiplier 000-33333-3",,,,,,,,,,,
+"Statement as at:","01 Jan 2025",,,,,,,,,,,
+"",,,,,,,,,,,
+"Currency:","SGD",,,,,,,,,,,
+"",,,,,,,,,,,
+"",,,,,,,,,,,
+"",,,,,,,,,,,
+"",,,,,,,,,,,
+"Transaction Date","Posting Date","Statement Code","Description","Supplementary Code","Supplementary Code Description","Client Reference","Reference","Status","Balance","Debit Amount","Credit Amount"
+"15 Dec 2024","15 Dec 2024","SAL","EMPLOYER CO PAYROLL DEC2024","","PAYROLL DEC2024","REF001","","Settled","3500.00","",3500
+"14 Dec 2024","14 Dec 2024","IBG","SUPERMARKET PTE LTD","GROC","Weekly shop","GRC001","","Settled","3379.50",120.50,""
+"10 Dec 2024","10 Dec 2024","ICT","PayNow Transfer To FRIEND","PAYN","lunch","TRF001","","Settled","3354.50",25.00,""

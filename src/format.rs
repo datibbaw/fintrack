@@ -319,6 +319,89 @@ fn load_grid(content: &str) -> Result<Vec<Vec<String>>> {
     Ok(grid)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dbs() -> Format {
+        load("dbs").unwrap()
+    }
+
+    // ── 9-column savings/current format ───────────────────────────────────────
+
+    #[test]
+    fn parse_9col_account_and_currency() {
+        let parsed = apply(&dbs(), include_str!("../tests/fixtures/dbs_9col.csv")).unwrap();
+        assert_eq!(parsed.account_number.as_deref(), Some("000-11111-1"));
+        assert_eq!(parsed.account_name.as_deref(), Some("Test Savings"));
+        assert_eq!(parsed.currency.as_deref(), Some("SGD"));
+    }
+
+    #[test]
+    fn parse_9col_row_count_and_fields() {
+        let parsed = apply(&dbs(), include_str!("../tests/fixtures/dbs_9col.csv")).unwrap();
+        assert_eq!(parsed.rows.len(), 4);
+
+        let row = &parsed.rows[0]; // salary credit
+        assert_eq!(row.date, "15 Dec 2024");
+        assert_eq!(row.code, "SAL");
+        assert_eq!(row.ref1, "EMPLOYER CO");
+        assert_eq!(row.ref2, "PAYROLL DEC2024");
+        assert_eq!(row.credit, "3500");
+        assert_eq!(row.debit, "");
+    }
+
+    // ── 8-column credit card format ───────────────────────────────────────────
+
+    #[test]
+    fn parse_cc_account_no_currency() {
+        let parsed = apply(&dbs(), include_str!("../tests/fixtures/dbs_cc.csv")).unwrap();
+        assert_eq!(parsed.account_number.as_deref(), Some("0000-1111-2222-3333"));
+        assert_eq!(parsed.account_name.as_deref(), Some("DBS Test Card"));
+        // Credit card header has no "Available Balance:" row, so currency stays None
+        assert_eq!(parsed.currency, None);
+    }
+
+    #[test]
+    fn parse_cc_row_count_and_fields() {
+        let parsed = apply(&dbs(), include_str!("../tests/fixtures/dbs_cc.csv")).unwrap();
+        assert_eq!(parsed.rows.len(), 4);
+
+        let row = &parsed.rows[0]; // autopay credit
+        assert_eq!(row.date, "19 Dec 2024");
+        assert_eq!(row.description, "AUTOPAY AC#999000000001");
+        assert_eq!(row.ref1, "PAYMENT"); // Transaction Type → ref1
+        assert_eq!(row.ref2, "Others");  // Payment Type → ref2
+        assert_eq!(row.credit, "450.25");
+        assert_eq!(row.debit, "");
+    }
+
+    // ── 12-column statement code format ──────────────────────────────────────
+
+    #[test]
+    fn parse_12col_account_and_currency() {
+        let parsed = apply(&dbs(), include_str!("../tests/fixtures/dbs_12col.csv")).unwrap();
+        assert_eq!(parsed.account_number.as_deref(), Some("000-33333-3"));
+        assert_eq!(parsed.account_name.as_deref(), Some("Test Multiplier"));
+        assert_eq!(parsed.currency.as_deref(), Some("SGD"));
+    }
+
+    #[test]
+    fn parse_12col_row_count_and_fields() {
+        let parsed = apply(&dbs(), include_str!("../tests/fixtures/dbs_12col.csv")).unwrap();
+        assert_eq!(parsed.rows.len(), 3);
+
+        let row = &parsed.rows[0]; // salary credit
+        assert_eq!(row.date, "15 Dec 2024");
+        assert_eq!(row.code, "SAL");
+        assert_eq!(row.description, "EMPLOYER CO PAYROLL DEC2024");
+        assert_eq!(row.ref2, "PAYROLL DEC2024"); // Supplementary Code Description
+        assert_eq!(row.ref3, "REF001");           // Client Reference
+        assert_eq!(row.credit, "3500");
+        assert_eq!(row.debit, "");
+    }
+}
+
 /// Parse CSV content using the given format definition.
 pub fn apply(fmt: &Format, content: &str) -> Result<ParsedCsv> {
     // Load all rows into a grid

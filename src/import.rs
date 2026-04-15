@@ -138,3 +138,152 @@ pub fn import_csv(
         skipped,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Open a fresh SQLite database in a temp directory.
+    /// The returned `TempDir` must stay alive for the duration of the test;
+    /// dropping it deletes the directory and the database inside it.
+    fn tmp_conn() -> (tempfile::TempDir, Connection) {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("test.db");
+        let conn = db::open(path.to_str().unwrap()).unwrap();
+        (dir, conn)
+    }
+
+    // ── 9-column savings/current ──────────────────────────────────────────────
+
+    #[test]
+    fn import_9col_creates_account_and_transactions() {
+        let (_dir, conn) = tmp_conn();
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/dbs_9col.csv");
+
+        let result = import_csv(&conn, path, "dbs", None, "DBS", "SGD").unwrap();
+
+        assert_eq!(result.account_number, "000-11111-1");
+        assert_eq!(result.account_name, "Test Savings");
+        assert_eq!(result.imported, 4);
+        assert_eq!(result.skipped, 0);
+    }
+
+    #[test]
+    fn import_9col_date_and_fields_stored_correctly() {
+        let (_dir, conn) = tmp_conn();
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/dbs_9col.csv");
+        import_csv(&conn, path, "dbs", None, "DBS", "SGD").unwrap();
+
+        let (date, ref1, debit, credit): (String, String, Option<f64>, Option<f64>) = conn
+            .query_row(
+                "SELECT date, ref1, debit, credit FROM transactions WHERE code = 'SAL'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+
+        assert_eq!(date, "2024-12-15"); // "15 Dec 2024" → ISO-8601
+        assert_eq!(ref1, "EMPLOYER CO");
+        assert_eq!(debit, None);
+        assert_eq!(credit, Some(3500.0));
+    }
+
+    // ── 8-column credit card ──────────────────────────────────────────────────
+
+    #[test]
+    fn import_cc_creates_account_and_transactions() {
+        let (_dir, conn) = tmp_conn();
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/dbs_cc.csv");
+
+        let result = import_csv(&conn, path, "dbs", None, "DBS", "SGD").unwrap();
+
+        assert_eq!(result.account_number, "0000-1111-2222-3333");
+        assert_eq!(result.account_name, "DBS Test Card");
+        assert_eq!(result.imported, 4);
+        assert_eq!(result.skipped, 0);
+    }
+
+    #[test]
+    fn import_cc_autopay_credit_stored_correctly() {
+        let (_dir, conn) = tmp_conn();
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/dbs_cc.csv");
+        import_csv(&conn, path, "dbs", None, "DBS", "SGD").unwrap();
+
+        let (credit, ref1): (Option<f64>, String) = conn
+            .query_row(
+                "SELECT credit, ref1 FROM transactions WHERE description LIKE 'AUTOPAY%'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+
+        assert_eq!(credit, Some(450.25));
+        assert_eq!(ref1, "PAYMENT"); // Transaction Type maps to ref1
+    }
+
+    // ── 12-column statement code format ──────────────────────────────────────
+
+    #[test]
+    fn import_12col_creates_account_and_transactions() {
+        let (_dir, conn) = tmp_conn();
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/dbs_12col.csv");
+
+        let result = import_csv(&conn, path, "dbs", None, "DBS", "SGD").unwrap();
+
+        assert_eq!(result.account_number, "000-33333-3");
+        assert_eq!(result.account_name, "Test Multiplier");
+        assert_eq!(result.imported, 3);
+        assert_eq!(result.skipped, 0);
+    }
+
+    #[test]
+    fn import_12col_fields_stored_correctly() {
+        let (_dir, conn) = tmp_conn();
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/dbs_12col.csv");
+        import_csv(&conn, path, "dbs", None, "DBS", "SGD").unwrap();
+
+        let (code, description, ref3): (String, String, String) = conn
+            .query_row(
+                "SELECT code, description, ref3 FROM transactions WHERE code = 'SAL'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+
+        assert_eq!(code, "SAL");
+        assert_eq!(description, "EMPLOYER CO PAYROLL DEC2024");
+        assert_eq!(ref3, "REF001"); // Client Reference
+    }
+
+    // ── Cross-cutting: deduplication and auto-account creation ────────────────
+
+    #[test]
+    fn import_dedup_skips_on_reimport() {
+        let (_dir, conn) = tmp_conn();
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/dbs_9col.csv");
+
+        let first = import_csv(&conn, path, "dbs", None, "DBS", "SGD").unwrap();
+        assert_eq!(first.imported, 4);
+        assert_eq!(first.skipped, 0);
+
+        let second = import_csv(&conn, path, "dbs", None, "DBS", "SGD").unwrap();
+        assert_eq!(second.imported, 0);
+        assert_eq!(second.skipped, 4);
+    }
+
+    #[test]
+    fn import_auto_creates_account_from_csv_metadata() {
+        let (_dir, conn) = tmp_conn();
+        assert!(db::list_accounts(&conn).unwrap().is_empty());
+
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/dbs_9col.csv");
+        import_csv(&conn, path, "dbs", None, "DBS", "SGD").unwrap();
+
+        let accounts = db::list_accounts(&conn).unwrap();
+        assert_eq!(accounts.len(), 1);
+        assert_eq!(accounts[0].number, "000-11111-1");
+        assert_eq!(accounts[0].name, "Test Savings");
+        assert_eq!(accounts[0].bank, "DBS");
+        assert_eq!(accounts[0].currency, "SGD");
+    }
+}

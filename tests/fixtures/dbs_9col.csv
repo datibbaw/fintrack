@@ -1,0 +1,11 @@
+"Account Details For:","Test Savings 000-11111-1",,,,,,,
+"Statement as at:","01 Jan 2025",,,,,,,
+"",,,,,,,
+"Available Balance:","SGD 1500.00",,,,,,,
+"Ledger Balance:","SGD 1500.00",,,,,,,
+"",,,,,,,
+"Transaction Date","Transaction Code","Description","Transaction Ref1","Transaction Ref2","Transaction Ref3","Status","Debit Amount","Credit Amount"
+"15 Dec 2024","SAL","EMPLOYER CO PAYROLL DEC2024 REF001","EMPLOYER CO","PAYROLL DEC2024","REF001","Settled","",3500
+"14 Dec 2024","IBG","SUPERMARKET PTE LTD Weekly shop GRC001","SUPERMARKET PTE LTD","Weekly shop","GRC001","Settled",120.50,""
+"10 Dec 2024","ICT","PayNow Transfer 1000001 To: FRIEND OTHR lunch","PayNow Transfer 1000001","To: FRIEND","OTHR lunch","Settled",25.00,""
+"05 Dec 2024","CCC","DBS CARD CENTRE DCC PAYMENT 100000000001","DBS CARD CENTRE","DCC PAYMENT","100000000001","Settled",450.25,""

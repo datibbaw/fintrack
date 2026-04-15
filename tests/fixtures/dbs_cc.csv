@@ -1,0 +1,11 @@
+"Card Transaction Details For:","DBS Test Card 0000-1111-2222-3333",,,,,,
+"Transactions as at:","01 Jan 2025",,,,,,
+"",,,,,,,
+"Credit Limit:","SGD 5000",,,,,,
+"Available Limit:","SGD 3250.35",,,,,,
+"",,,,,,,
+"Transaction Date","Transaction Posting Date","Transaction Description","Transaction Type","Payment Type","Transaction Status","Debit Amount","Credit Amount"
+"19 Dec 2024","19 Dec 2024","AUTOPAY AC#999000000001","PAYMENT","Others","Settled","",450.25
+"15 Dec 2024","16 Dec 2024","COFFEE SHOP SINGAPORE SG","PURCHASE","Contactless","Settled",6.50,""
+"14 Dec 2024","15 Dec 2024","SUPERMART ONLINE SINGAPORE SG","PURCHASE","Online/In-App Payment","Settled",45.90,""
+"12 Dec 2024","14 Dec 2024","BUS/MRT 000000001 SINGAPORE SG","PURCHASE","Contactless","Settled",2.07,""
