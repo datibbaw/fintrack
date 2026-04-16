@@ -196,15 +196,6 @@ enum ReportCmd {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let db_path = shellexpand::tilde(&cli.db).into_owned();
-
-    // The server command opens its own connection inside the async runtime.
-    if let Commands::Server { port, no_open } = cli.command {
-        let rt = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()?;
-        return rt.block_on(server::serve(&db_path, port, !no_open));
-    }
-
     let conn = db::open(&db_path)?;
 
     match cli.command {
@@ -436,8 +427,12 @@ fn main() -> Result<()> {
             }
         },
 
-        // Handled above before the DB connection is opened
-        Commands::Server { .. } => unreachable!(),
+        Commands::Server { port, no_open } => {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()?;
+            return rt.block_on(server::serve(conn, port, !no_open));
+        }
     }
 
     Ok(())

@@ -8,6 +8,7 @@ use axum::{
     routing::{get, put},
     Json, Router,
 };
+use rusqlite::Connection;
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
 
@@ -467,8 +468,7 @@ fn serve_asset(path: &str) -> Response {
 
 // ── Server entry point ────────────────────────────────────────────────────────
 
-pub async fn serve(db_path: &str, port: u16, open: bool) -> anyhow::Result<()> {
-    let conn = crate::db::open(db_path)?;
+pub async fn serve(conn: Connection, port: u16, open: bool) -> anyhow::Result<()> {
     let state: Db = Arc::new(Mutex::new(conn));
 
     let api = Router::new()

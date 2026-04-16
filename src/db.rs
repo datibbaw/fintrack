@@ -115,8 +115,7 @@ pub fn add_account(
 pub fn list_accounts(conn: &Connection) -> Result<Vec<Account>> {
     let mut stmt =
         conn.prepare("SELECT id, name, number, bank, currency FROM accounts ORDER BY id")?;
-    let rows = from_rows::<Account>(stmt.query([])?)
-        .collect::<serde_rusqlite::Result<Vec<_>>>()?;
+    let rows = from_rows::<Account>(stmt.query([])?).collect::<serde_rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
 }
 
@@ -133,7 +132,10 @@ pub fn find_account(conn: &Connection, number_or_name: &str) -> Result<Option<Ac
 }
 
 pub fn remove_account(conn: &Connection, id: i64) -> Result<()> {
-    conn.execute("DELETE FROM transactions WHERE account_id = ?1", params![id])?;
+    conn.execute(
+        "DELETE FROM transactions WHERE account_id = ?1",
+        params![id],
+    )?;
     conn.execute("DELETE FROM accounts WHERE id = ?1", params![id])?;
     Ok(())
 }
@@ -152,8 +154,8 @@ pub fn list_categories(conn: &Connection) -> Result<Vec<Category>> {
     let mut stmt = conn.prepare(
         "SELECT id, name, parent_id FROM categories ORDER BY parent_id NULLS FIRST, name",
     )?;
-    let rows = from_rows::<Category>(stmt.query([])?)
-        .collect::<serde_rusqlite::Result<Vec<_>>>()?;
+    let rows =
+        from_rows::<Category>(stmt.query([])?).collect::<serde_rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
 }
 
