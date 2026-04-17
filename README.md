@@ -19,12 +19,31 @@ All data stays on your machine — fintrack stores everything in a single SQLite
 
 ## Installation
 
-### Prerequisites
+### Pre-built binary (recommended)
 
-- [Rust](https://rustup.rs/) (stable toolchain)
-- [Node.js](https://nodejs.org/) (v18 or later) — only needed if you want to build the frontend yourself
+The quickest way to install — no Rust or Node.js required:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/datibbaw/fintrack/master/install.sh | sh
+```
+
+This downloads the right binary for your platform, removes the macOS quarantine flag automatically, and installs to `~/.local/bin`. To install elsewhere:
+
+```bash
+INSTALL_DIR=/usr/local/bin curl -fsSL https://raw.githubusercontent.com/datibbaw/fintrack/master/install.sh | sh
+```
+
+To install a specific version instead of the latest:
+
+```bash
+VERSION=v1.4.0 curl -fsSL https://raw.githubusercontent.com/datibbaw/fintrack/master/install.sh | sh
+```
+
+Supported platforms: macOS (Apple Silicon and Intel), Linux (x86_64).
 
 ### Install from source
+
+Requires [Rust](https://rustup.rs/) (stable toolchain) and [Node.js](https://nodejs.org/) (v18 or later).
 
 ```bash
 git clone https://github.com/datibbaw/fintrack.git
