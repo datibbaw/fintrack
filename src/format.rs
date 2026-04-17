@@ -95,6 +95,17 @@ impl HeaderDef {
                 .get(m.index())
                 .map(|s| s.trim().to_string())
                 .unwrap_or_default();
+            if m.field == Field::Amount {
+                // Signed amount: positive → debit, negative → credit (absolute value).
+                if let Ok(n) = value.replace(',', "").parse::<f64>() {
+                    if n < 0.0 {
+                        parsed.credit = format!("{}", -n);
+                    } else {
+                        parsed.debit = value;
+                    }
+                }
+                continue;
+            }
             let setter: fn(&mut ParsedRow, String) = match m.field {
                 Field::Date => |r, v| r.date = v,
                 Field::Code => |r, v| r.code = v,
@@ -105,6 +116,7 @@ impl HeaderDef {
                 Field::Status => |r, v| r.status = v,
                 Field::Debit => |r, v| r.debit = v,
                 Field::Credit => |r, v| r.credit = v,
+                Field::Amount => unreachable!(),
             };
             setter(&mut parsed, value);
         }
@@ -176,6 +188,8 @@ enum Field {
     Status,
     Debit,
     Credit,
+    /// Signed amount: positive → debit, negative → credit (absolute value).
+    Amount,
 }
 
 const REQUIRED_FIELDS: &[Field] = &[Field::Date, Field::Debit, Field::Credit];
@@ -201,15 +215,23 @@ fn validate(fmt: &Format) -> Result<()> {
         }
         let seen: HashSet<Field> = hdr.fields().into_iter().collect();
 
-        for req in REQUIRED_FIELDS {
-            if !seen.contains(req) {
-                bail!(
-                    "format '{}': header[{h}].mappings must include a '{:?}' mapping",
-                    fmt.name,
-                    req
-                );
-            }
+        // Accept either explicit debit+credit columns, or a single signed amount column.
+        let has_amount_pair = seen.contains(&Field::Debit) && seen.contains(&Field::Credit);
+        let has_amount = seen.contains(&Field::Amount);
+
+        if !seen.contains(&Field::Date) {
+            bail!(
+                "format '{}': header[{h}].mappings must include a 'date' mapping",
+                fmt.name
+            );
         }
+        if !has_amount_pair && !has_amount {
+            bail!(
+                "format '{}': header[{h}].mappings must include either 'debit'+'credit' or 'amount'",
+                fmt.name
+            );
+        }
+        let _ = REQUIRED_FIELDS; // suppress unused warning
 
         if !IDENTIFIER_FIELDS.iter().any(|f| seen.contains(f)) {
             bail!(
@@ -402,6 +424,42 @@ mod tests {
         assert_eq!(row.ref3, "REF001"); // Client Reference
         assert_eq!(row.credit, "3500");
         assert_eq!(row.debit, "");
+    }
+
+    // ── Amex ──────────────────────────────────────────────────────────────────
+
+    fn amex() -> Format {
+        load("amex").unwrap()
+    }
+
+    #[test]
+    fn parse_amex_no_account_or_currency() {
+        let parsed = apply(&amex(), include_str!("../tests/fixtures/amex.csv")).unwrap();
+        assert_eq!(parsed.account_number, None);
+        assert_eq!(parsed.account_name, None);
+        assert_eq!(parsed.currency, None);
+    }
+
+    #[test]
+    fn parse_amex_row_count_and_fields() {
+        let parsed = apply(&amex(), include_str!("../tests/fixtures/amex.csv")).unwrap();
+        assert_eq!(parsed.rows.len(), 3);
+
+        let row = &parsed.rows[0]; // charge
+        assert_eq!(row.date, "04/11/2026");
+        assert_eq!(row.description, "SINGAPOREAIR SINGAPORE  SINGAPORE");
+        assert_eq!(row.debit, "6123.80");
+        assert_eq!(row.credit, "");
+        assert_eq!(row.ref2, "'AT261020003000010014814'");
+    }
+
+    #[test]
+    fn parse_amex_negative_amount_becomes_credit() {
+        let parsed = apply(&amex(), include_str!("../tests/fixtures/amex.csv")).unwrap();
+        let row = &parsed.rows[1]; // bank debit repayment
+        assert_eq!(row.description, "AMT DEBITED TO YOUR BANK ACCT");
+        assert_eq!(row.debit, "");
+        assert_eq!(row.credit, "606.01");
     }
 }
 

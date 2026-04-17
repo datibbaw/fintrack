@@ -16,11 +16,15 @@ pub struct ImportResult {
 
 fn parse_date(s: &str) -> Result<NaiveDate> {
     let s = s.trim();
-    // Try CSV format first ("28 Mar 2026"), then ISO-8601 from qif_parser ("2026-03-28").
+    // Try several known formats in order.
     NaiveDate::parse_from_str(s, "%d %b %Y")
         .or_else(|_| NaiveDate::parse_from_str(s, "%Y-%m-%d"))
+        .or_else(|_| NaiveDate::parse_from_str(s, "%m/%d/%Y"))
         .with_context(|| {
-            format!("unrecognised date format: '{s}' (expected '28 Mar 2026' or '2026-03-28')")
+            format!(
+                "unrecognised date format: '{s}' \
+                 (expected '28 Mar 2026', '2026-03-28', or '04/11/2026')"
+            )
         })
 }
 
@@ -400,6 +404,64 @@ mod tests {
             .unwrap();
         assert_eq!(debit, None);
         assert_eq!(credit, Some(39.0));
+    }
+
+    // ── Amex ──────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn import_amex_requires_account_hint() {
+        let (_dir, conn) = tmp_conn();
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/amex.csv");
+        let err = import_csv(&conn, path, "amex", None, "Amex", "SGD").unwrap_err();
+        assert!(err.to_string().contains("--account"));
+    }
+
+    #[test]
+    fn import_amex_debit_and_credit_stored_correctly() {
+        let (_dir, conn) = tmp_conn();
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/amex.csv");
+        db::add_account(&conn, "Amex Platinum", "378282246310005", "Amex", "SGD").unwrap();
+        import_csv(&conn, path, "amex", Some("378282246310005"), "Amex", "SGD").unwrap();
+
+        // Charge: positive amount → debit
+        let (debit, credit, date): (Option<f64>, Option<f64>, String) = conn
+            .query_row(
+                "SELECT debit, credit, date FROM transactions \
+                 WHERE description LIKE 'SINGAPOREAIR%'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(debit, Some(6123.80));
+        assert_eq!(credit, None);
+        assert_eq!(date, "2026-04-11"); // MM/DD/YYYY → ISO-8601
+
+        // Payment: negative amount → credit
+        let (debit, credit): (Option<f64>, Option<f64>) = conn
+            .query_row(
+                "SELECT debit, credit FROM transactions \
+                 WHERE description LIKE 'AMT DEBITED%'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(debit, None);
+        assert_eq!(credit, Some(606.01));
+    }
+
+    #[test]
+    fn import_amex_dedup_skips_on_reimport() {
+        let (_dir, conn) = tmp_conn();
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/amex.csv");
+        db::add_account(&conn, "Amex Platinum", "378282246310005", "Amex", "SGD").unwrap();
+
+        let first = import_csv(&conn, path, "amex", Some("378282246310005"), "Amex", "SGD").unwrap();
+        assert_eq!(first.imported, 3);
+        assert_eq!(first.skipped, 0);
+
+        let second = import_csv(&conn, path, "amex", Some("378282246310005"), "Amex", "SGD").unwrap();
+        assert_eq!(second.imported, 0);
+        assert_eq!(second.skipped, 3);
     }
 
     #[test]
