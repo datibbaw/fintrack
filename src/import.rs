@@ -97,7 +97,13 @@ pub fn import_csv(
         db::find_account(conn, &file_number)?.unwrap()
     };
 
-    insert_rows(conn, &parsed.rows, account.id, &account.name, &account.number)
+    insert_rows(
+        conn,
+        &parsed.rows,
+        account.id,
+        &account.name,
+        &account.number,
+    )
 }
 
 pub fn import_qif(
@@ -117,12 +123,16 @@ pub fn import_qif(
     })?;
 
     let account = db::find_account(conn, hint)?.ok_or_else(|| {
-        anyhow::anyhow!(
-            "account not found: '{hint}'. Add it first with `fintrack account add`."
-        )
+        anyhow::anyhow!("account not found: '{hint}'. Add it first with `fintrack account add`.")
     })?;
 
-    insert_rows(conn, &parsed.rows, account.id, &account.name, &account.number)
+    insert_rows(
+        conn,
+        &parsed.rows,
+        account.id,
+        &account.name,
+        &account.number,
+    )
 }
 
 fn insert_rows(

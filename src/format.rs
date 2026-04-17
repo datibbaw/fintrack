@@ -356,7 +356,10 @@ mod tests {
     #[test]
     fn parse_cc_account_no_currency() {
         let parsed = apply(&dbs(), include_str!("../tests/fixtures/dbs_cc.csv")).unwrap();
-        assert_eq!(parsed.account_number.as_deref(), Some("0000-1111-2222-3333"));
+        assert_eq!(
+            parsed.account_number.as_deref(),
+            Some("0000-1111-2222-3333")
+        );
         assert_eq!(parsed.account_name.as_deref(), Some("DBS Test Card"));
         // Credit card header has no "Available Balance:" row, so currency stays None
         assert_eq!(parsed.currency, None);
@@ -371,7 +374,7 @@ mod tests {
         assert_eq!(row.date, "19 Dec 2024");
         assert_eq!(row.description, "AUTOPAY AC#999000000001");
         assert_eq!(row.ref1, "PAYMENT"); // Transaction Type → ref1
-        assert_eq!(row.ref2, "Others");  // Payment Type → ref2
+        assert_eq!(row.ref2, "Others"); // Payment Type → ref2
         assert_eq!(row.credit, "450.25");
         assert_eq!(row.debit, "");
     }
@@ -396,7 +399,7 @@ mod tests {
         assert_eq!(row.code, "SAL");
         assert_eq!(row.description, "EMPLOYER CO PAYROLL DEC2024");
         assert_eq!(row.ref2, "PAYROLL DEC2024"); // Supplementary Code Description
-        assert_eq!(row.ref3, "REF001");           // Client Reference
+        assert_eq!(row.ref3, "REF001"); // Client Reference
         assert_eq!(row.credit, "3500");
         assert_eq!(row.debit, "");
     }

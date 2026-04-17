@@ -214,10 +214,9 @@ fn query_summary(
     double_vals.extend(vals.iter().cloned());
 
     let mut stmt = conn.prepare(&sql)?;
-    let summary_rows = from_rows::<SummaryRow>(
-        stmt.query(rusqlite::params_from_iter(double_vals.iter()))?,
-    )
-    .collect::<serde_rusqlite::Result<Vec<_>>>()?;
+    let summary_rows =
+        from_rows::<SummaryRow>(stmt.query(rusqlite::params_from_iter(double_vals.iter()))?)
+            .collect::<serde_rusqlite::Result<Vec<_>>>()?;
 
     Ok(SummaryResponse {
         rows: summary_rows,
@@ -276,10 +275,9 @@ fn query_transactions(
     );
 
     let mut stmt = conn.prepare(&sql)?;
-    let rows = from_rows::<TransactionDto>(
-        stmt.query(rusqlite::params_from_iter(paginated_vals.iter()))?,
-    )
-    .collect::<serde_rusqlite::Result<Vec<_>>>()?;
+    let rows =
+        from_rows::<TransactionDto>(stmt.query(rusqlite::params_from_iter(paginated_vals.iter()))?)
+            .collect::<serde_rusqlite::Result<Vec<_>>>()?;
 
     Ok(TransactionsResponse { rows, total })
 }
@@ -298,8 +296,8 @@ fn query_categories(conn: &rusqlite::Connection) -> anyhow::Result<Vec<CategoryD
          GROUP BY c.id \
          ORDER BY c.parent_id NULLS FIRST, c.name",
     )?;
-    let rows = from_rows::<CategoryDto>(stmt.query([])?)
-        .collect::<serde_rusqlite::Result<Vec<_>>>()?;
+    let rows =
+        from_rows::<CategoryDto>(stmt.query([])?).collect::<serde_rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
 }
 

@@ -243,7 +243,10 @@ fn main() -> Result<()> {
                 io::stdin().lock().read_line(&mut line)?;
                 if line.trim().eq_ignore_ascii_case("y") {
                     db::remove_account(&conn, acc.id)?;
-                    println!("Removed account '{}' ({}) and {tx_count} transaction(s).", acc.name, acc.number);
+                    println!(
+                        "Removed account '{}' ({}) and {tx_count} transaction(s).",
+                        acc.name, acc.number
+                    );
                 } else {
                     println!("Aborted.");
                 }
