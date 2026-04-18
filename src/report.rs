@@ -1,6 +1,8 @@
 use anyhow::Result;
-use comfy_table::{presets::UTF8_FULL, Table};
 use rusqlite::Connection;
+use serde::Deserialize;
+use serde_rusqlite::from_rows;
+use tabled::{Table, Tabled};
 
 use crate::db;
 
@@ -16,6 +18,19 @@ fn period_label(from: Option<&str>, to: Option<&str>) -> String {
 }
 
 // ── Summary report ────────────────────────────────────────────────────────────
+#[derive(Deserialize, Tabled)]
+#[tabled(rename_all = "PascalCase")]
+struct SummaryRow {
+    category: String,
+    #[tabled(rename = "Debit")]
+    total_debit: f64,
+    #[tabled(rename = "Credit")]
+    total_credit: f64,
+    #[tabled(format("{0:+.2}"))]
+    net: f64,
+    #[tabled(rename = "Transactions")]
+    tx_count: i64,
+}
 
 pub fn summary(
     conn: &Connection,
@@ -30,6 +45,7 @@ pub fn summary(
            COALESCE(c.name, 'Uncategorized') AS category, \
            SUM(COALESCE(t.debit,  0)) AS total_debit, \
            SUM(COALESCE(t.credit, 0)) AS total_credit, \
+           SUM(COALESCE(t.credit, 0)) - SUM(COALESCE(t.debit, 0)) AS net, \
            COUNT(*) AS tx_count \
          FROM transactions t \
          LEFT JOIN categories c ON t.category_id = c.id \
@@ -40,11 +56,8 @@ pub fn summary(
     );
 
     let mut stmt = conn.prepare(&sql)?;
-    let rows: Vec<(String, f64, f64, i64)> = stmt
-        .query_map(rusqlite::params_from_iter(vals.iter()), |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let rows = from_rows::<SummaryRow>(stmt.query(rusqlite::params_from_iter(vals.iter()))?)
+        .collect::<serde_rusqlite::Result<Vec<_>>>()?;
 
     if rows.is_empty() {
         println!("No transactions found.");
@@ -53,40 +66,57 @@ pub fn summary(
 
     println!("Period: {}\n", period_label(from, to));
 
-    let mut table = Table::new();
-    table.load_preset(UTF8_FULL);
-    table.set_header(["Category", "Debit", "Credit", "Net", "Txns"]);
+    let mut table_builder = Table::builder(&rows);
 
-    let mut total_debit = 0f64;
-    let mut total_credit = 0f64;
+    let (total_debit, total_credit, total_txn) = rows.iter().fold((0f64, 0f64, 0i64), |acc, r| {
+        (
+            acc.0 + r.total_debit,
+            acc.1 + r.total_credit,
+            acc.2 + r.tx_count,
+        )
+    });
 
-    for (cat, debit, credit, count) in &rows {
-        let net = credit - debit;
-        total_debit += debit;
-        total_credit += credit;
-        table.add_row([
-            cat.as_str(),
-            &format!("{debit:.2}"),
-            &format!("{credit:.2}"),
-            &format!("{net:+.2}"),
-            &count.to_string(),
-        ]);
-    }
-
-    let total_net = total_credit - total_debit;
-    table.add_row([
-        "TOTAL",
+    table_builder.push_record([
+        "Total",
         &format!("{total_debit:.2}"),
         &format!("{total_credit:.2}"),
-        &format!("{total_net:+.2}"),
-        "",
+        &format!("{:+.2}", total_credit - total_debit),
+        &total_txn.to_string(),
     ]);
 
-    println!("{table}");
+    println!("{}", table_builder.build());
     Ok(())
 }
 
 // ── Transaction listing ───────────────────────────────────────────────────────
+
+#[derive(Deserialize, Tabled)]
+#[tabled(rename_all = "PascalCase")]
+struct TransactionRow {
+    date: String,
+    code: String,
+    #[tabled(display = "short_description")]
+    description: String,
+    ref2: String,
+    category: String,
+    #[tabled(display = "display_amount")]
+    debit: Option<f64>,
+    #[tabled(display = "display_amount")]
+    credit: Option<f64>,
+    account: String,
+}
+
+fn short_description(desc: &str) -> &str {
+    if desc.len() > 42 {
+        &desc[..42]
+    } else {
+        desc
+    }
+}
+
+fn display_amount(v: &Option<f64>) -> String {
+    v.map(|a| format!("{a:.2}")).unwrap_or_default()
+}
 
 pub fn transactions(
     conn: &Connection,
@@ -108,7 +138,7 @@ pub fn transactions(
     let sql = format!(
         "SELECT t.date, t.code, t.description, t.ref2, \
                 COALESCE(c.name, 'Uncategorized') AS category, \
-                t.debit, t.credit, a.name AS acct \
+                t.debit, t.credit, a.name AS account \
          FROM transactions t \
          LEFT JOIN categories c ON t.category_id = c.id \
          JOIN  accounts a ON t.account_id = a.id \
@@ -118,66 +148,15 @@ pub fn transactions(
 
     let mut stmt = conn.prepare(&sql)?;
 
-    type Row = (
-        String,
-        String,
-        String,
-        String,
-        String,
-        Option<f64>,
-        Option<f64>,
-        String,
-    );
-    let rows: Vec<Row> = stmt
-        .query_map(rusqlite::params_from_iter(vals.iter()), |row| {
-            Ok((
-                row.get(0)?,
-                row.get(1)?,
-                row.get(2)?,
-                row.get(3)?,
-                row.get(4)?,
-                row.get(5)?,
-                row.get(6)?,
-                row.get(7)?,
-            ))
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let rows = from_rows::<TransactionRow>(stmt.query(rusqlite::params_from_iter(vals.iter()))?)
+        .collect::<serde_rusqlite::Result<Vec<_>>>()?;
 
     if rows.is_empty() {
         println!("No transactions found.");
         return Ok(());
     }
 
-    let mut table = Table::new();
-    table.load_preset(UTF8_FULL);
-    table.set_header([
-        "Date",
-        "Code",
-        "Description",
-        "Ref",
-        "Category",
-        "Debit",
-        "Credit",
-        "Account",
-    ]);
-
-    for (date, code, desc, ref2, cat, debit, credit, acct) in &rows {
-        let desc_short = if desc.len() > 42 {
-            &desc[..42]
-        } else {
-            desc.as_str()
-        };
-        table.add_row([
-            date.as_str(),
-            code.as_str(),
-            desc_short,
-            ref2.as_str(),
-            cat.as_str(),
-            &debit.map(|v| format!("{v:.2}")).unwrap_or_default(),
-            &credit.map(|v| format!("{v:.2}")).unwrap_or_default(),
-            acct.as_str(),
-        ]);
-    }
+    let table = Table::new(&rows);
 
     println!("{table}");
     println!("({} transactions)", rows.len());
