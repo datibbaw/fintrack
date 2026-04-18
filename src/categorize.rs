@@ -48,13 +48,13 @@ pub fn apply_rules(conn: &Connection) -> Result<usize> {
 
     let rules: Vec<CompiledRule> = raw
         .into_iter()
-        .filter_map(|(r, is_sub)| match Regex::new(&r.pattern) {
+        .filter_map(|r| match Regex::new(&r.pattern) {
             Ok(re) => Some(CompiledRule {
                 category_id: r.category_id,
                 field: r.field,
                 pattern: re,
                 priority: r.priority,
-                is_sub,
+                is_sub: r.category_is_sub,
             }),
             Err(e) => {
                 eprintln!(

@@ -15,9 +15,9 @@ pub fn open(path: &str) -> Result<Connection> {
 }
 
 fn migrations() -> Migrations<'static> {
-    Migrations::new(vec![
-        M::up(include_str!("migrations/01_initial_schema.sql")),
-    ])
+    Migrations::new(vec![M::up(include_str!(
+        "migrations/01_initial_schema.sql"
+    ))])
 }
 
 // ── Query helpers ─────────────────────────────────────────────────────────────
@@ -111,7 +111,10 @@ pub fn add_category(conn: &Connection, name: &str, parent_id: Option<i64>) -> Re
 
 pub fn list_categories(conn: &Connection) -> Result<Vec<Category>> {
     let mut stmt = conn.prepare(
-        "SELECT id, name, parent_id FROM categories ORDER BY parent_id NULLS FIRST, name",
+        "SELECT c.id, c.name, c.parent_id, p.name AS parent_name \
+         FROM categories c \
+         LEFT JOIN categories p ON c.parent_id = p.id \
+         ORDER BY c.parent_id NULLS FIRST, c.name",
     )?;
     let rows =
         from_rows::<Category>(stmt.query([])?).collect::<serde_rusqlite::Result<Vec<_>>>()?;
@@ -119,8 +122,12 @@ pub fn list_categories(conn: &Connection) -> Result<Vec<Category>> {
 }
 
 pub fn find_category(conn: &Connection, name: &str) -> Result<Option<Category>> {
-    let mut stmt =
-        conn.prepare("SELECT id, name, parent_id FROM categories WHERE name = ?1 LIMIT 1")?;
+    let mut stmt = conn.prepare(
+        "SELECT c.id, c.name, c.parent_id, p.name AS parent_name \
+                      FROM categories c \
+                      LEFT JOIN categories p ON c.parent_id = p.id \
+                      WHERE c.name = ?1 LIMIT 1",
+    )?;
     let mut rows = stmt.query(params![name])?;
     Ok(match rows.next()? {
         Some(row) => Some(from_row::<Category>(row)?),
@@ -172,41 +179,26 @@ pub fn list_rules_for_category(conn: &Connection, category_id: i64) -> Result<Ve
     Ok(rows)
 }
 
-pub fn list_rules(conn: &Connection, category_name: Option<&str>) -> Result<Vec<(Rule, String)>> {
-    let mut out = Vec::new();
-    if let Some(cat) = category_name {
-        let mut stmt = conn.prepare(
-            "SELECT r.id, r.category_id, r.field, r.pattern, r.priority, c.name \
-             FROM rules r JOIN categories c ON r.category_id = c.id \
-             WHERE c.name = ?1 ORDER BY r.priority DESC, r.id",
-        )?;
-        for row in stmt.query_map(params![cat], map_rule)? {
-            out.push(row?);
-        }
+pub fn list_rules(conn: &Connection, category_name: Option<&str>) -> Result<Vec<Rule>> {
+    let base = "SELECT r.id, r.category_id, r.field, r.pattern, r.priority, \
+                       c.name AS category_name, c.parent_id IS NOT NULL AS category_is_sub \
+                FROM rules r JOIN categories c ON r.category_id = c.id";
+    let (sql, params) = if let Some(cat) = category_name {
+        (
+            format!("{base} WHERE c.name = ?1 ORDER BY r.priority DESC, r.id"),
+            params![cat.to_string()],
+        )
     } else {
-        let mut stmt = conn.prepare(
-            "SELECT r.id, r.category_id, r.field, r.pattern, r.priority, c.name \
-             FROM rules r JOIN categories c ON r.category_id = c.id \
-             ORDER BY c.name, r.priority DESC, r.id",
-        )?;
-        for row in stmt.query_map([], map_rule)? {
-            out.push(row?);
-        }
-    }
-    Ok(out)
-}
+        (
+            format!("{base} ORDER BY c.name, r.priority DESC, r.id"),
+            params![],
+        )
+    };
+    let mut stmt = conn.prepare(&sql)?;
+    let rows =
+        from_rows::<Rule>(stmt.query(params)?).collect::<serde_rusqlite::Result<Vec<_>>>()?;
 
-fn map_rule(row: &rusqlite::Row<'_>) -> rusqlite::Result<(Rule, String)> {
-    Ok((
-        Rule {
-            id: row.get(0)?,
-            category_id: row.get(1)?,
-            field: row.get(2)?,
-            pattern: row.get(3)?,
-            priority: row.get(4)?,
-        },
-        row.get(5)?,
-    ))
+    Ok(rows)
 }
 
 pub fn remove_rule(conn: &Connection, id: i64) -> Result<()> {
@@ -236,27 +228,15 @@ pub fn delete_transactions_for_account(conn: &Connection, account_id: i64) -> Re
 /// Returns all rules, joined with their category to expose whether each rule belongs
 /// to a sub-category.
 /// Used by the categorisation engine to break priority ties in favour of more specific rules.
-pub fn all_rules_with_depth(conn: &Connection) -> Result<Vec<(Rule, bool)>> {
+pub fn all_rules_with_depth(conn: &Connection) -> Result<Vec<Rule>> {
     let mut stmt = conn.prepare(
         "SELECT r.id, r.category_id, r.field, r.pattern, r.priority, \
-                c.parent_id IS NOT NULL AS is_sub \
+                c.parent_id IS NOT NULL AS category_is_sub \
          FROM rules r \
          JOIN categories c ON r.category_id = c.id \
          ORDER BY r.priority DESC, r.id",
     )?;
-    let rows = stmt
-        .query_map([], |row| {
-            Ok((
-                Rule {
-                    id: row.get(0)?,
-                    category_id: row.get(1)?,
-                    field: row.get(2)?,
-                    pattern: row.get(3)?,
-                    priority: row.get(4)?,
-                },
-                row.get::<_, bool>(5)?,
-            ))
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let rows = from_rows::<Rule>(stmt.query([])?).collect::<serde_rusqlite::Result<Vec<_>>>()?;
+
     Ok(rows)
 }
