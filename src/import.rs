@@ -455,11 +455,13 @@ mod tests {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/amex.csv");
         db::add_account(&conn, "Amex Platinum", "378282246310005", "Amex", "SGD").unwrap();
 
-        let first = import_csv(&conn, path, "amex", Some("378282246310005"), "Amex", "SGD").unwrap();
+        let first =
+            import_csv(&conn, path, "amex", Some("378282246310005"), "Amex", "SGD").unwrap();
         assert_eq!(first.imported, 3);
         assert_eq!(first.skipped, 0);
 
-        let second = import_csv(&conn, path, "amex", Some("378282246310005"), "Amex", "SGD").unwrap();
+        let second =
+            import_csv(&conn, path, "amex", Some("378282246310005"), "Amex", "SGD").unwrap();
         assert_eq!(second.imported, 0);
         assert_eq!(second.skipped, 3);
     }

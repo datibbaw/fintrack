@@ -1,6 +1,5 @@
 use anyhow::{anyhow, Result};
 use clap::{Parser, Subcommand};
-use comfy_table::Table;
 use std::io::{self, BufRead, Write};
 
 mod categorize;
@@ -206,17 +205,7 @@ fn main() -> Result<()> {
                 if accounts.is_empty() {
                     println!("No accounts yet. Add one with:\n  fintrack account add --name <name> --number <number>");
                 } else {
-                    let mut table = Table::new();
-                    table.set_header(["ID", "Name", "Number", "Bank", "Currency"]);
-                    for a in &accounts {
-                        table.add_row([
-                            &a.id.to_string(),
-                            &a.name,
-                            &a.number,
-                            &a.bank,
-                            &a.currency,
-                        ]);
-                    }
+                    let table = tabled::Table::new(&accounts);
                     println!("{table}");
                 }
             }
@@ -286,16 +275,7 @@ fn main() -> Result<()> {
                 if cats.is_empty() {
                     println!("No categories yet. Add one with:\n  fintrack category add <name>");
                 } else {
-                    let mut table = Table::new();
-                    table.set_header(["ID", "Name", "Parent"]);
-                    for c in &cats {
-                        let parent = c
-                            .parent_id
-                            .and_then(|pid| cats.iter().find(|p| p.id == pid))
-                            .map(|p| p.name.as_str())
-                            .unwrap_or("-");
-                        table.add_row([&c.id.to_string(), &c.name, parent]);
-                    }
+                    let table = tabled::Table::new(&cats);
                     println!("{table}");
                 }
             }
@@ -327,17 +307,7 @@ fn main() -> Result<()> {
                     if rules.is_empty() {
                         println!("No rules found.");
                     } else {
-                        let mut table = Table::new();
-                        table.set_header(["ID", "Category", "Field", "Pattern", "Priority"]);
-                        for (r, cat_name) in &rules {
-                            table.add_row([
-                                &r.id.to_string(),
-                                cat_name,
-                                &r.field,
-                                &r.pattern,
-                                &r.priority.to_string(),
-                            ]);
-                        }
+                        let table = tabled::Table::new(&rules);
                         println!("{table}");
                     }
                 }
