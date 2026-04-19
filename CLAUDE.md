@@ -41,24 +41,25 @@ The resulting `~/.cargo/bin/fintrack` binary includes the full web UI via `rust-
 
 ```
 src/
-  main.rs           — CLI (clap): Account, Import, Category, Rule, Transaction, Categorize, Report, Server
-  models.rs         — Plain structs: Account, Category, Rule
+  main.rs           — CLI (clap): Account, Import (--account required), Category, Rule, Transaction, Categorize, Report, Server
+  models/           — Plain structs: Account, Category, Rule, Transaction, TransactionBuilder
   db.rs             — All SQLite reads/writes (rusqlite); calls rusqlite_migration on open
   migrations/
     01_initial_schema.sql — Full schema DDL (accounts, categories, transactions, rules + indexes)
-  format.rs         — YAML format DSL loader/parser; rust-embeds formats/*.yaml
-  import.rs         — CSV/QIF parsing and dedup-import (uses format.rs for CSV)
+  readers/
+    csv/reader.rs   — CSV format DSL loader/parser; rust-embeds specs/csv.yaml
+  import.rs         — CSV/QIF parsing and dedup-import (uses readers/csv for CSV)
   qif.rs            — QIF file parsing
   categorize.rs     — Applies regex rules to every transaction; highest priority wins
   report.rs         — CLI table output for summary and transaction listing
   server.rs         — Axum HTTP server: JSON API + rust-embed static file serving
   build.rs          — Tells Cargo to watch web/dist/ for changes
 
-formats/
-  dbs.yaml          — CSV format definition for DBS bank exports (supports 3 column layouts)
+specs/
+  csv.yaml          — All supported CSV bank formats as a YAML list (rust-embedded)
 
 tests/
-  fixtures/         — Sample CSV/QIF files used by unit tests in format.rs
+  fixtures/         — Sample CSV/QIF files used by unit tests in readers/csv
 
 web/
   src/           — TypeScript + Preact source
@@ -79,9 +80,9 @@ web/
 ## Key architectural decisions
 
 - **SQLite only** — single `~/.fintrack.db` file (overridable via `--db` flag or `FINTRACK_DB` env var); WAL mode; foreign keys on. No ORM.
-- **rust-embed** — the entire `web/dist/` is baked into the binary at compile time. No separate asset deployment needed. `formats/*.yaml` are also rust-embedded (into `format.rs` via the `FormatAssets` struct).
+- **rust-embed** — the entire `web/dist/` is baked into the binary at compile time. No separate asset deployment needed. `specs/csv.yaml` is also rust-embedded (into `readers/csv/reader.rs` via the `Specs` struct).
 - **Schema migrations** — managed by `rusqlite_migration`; SQL lives in `src/migrations/`. Add a new `M::up(include_str!(...))` entry to `db::migrations()` to add a migration. `rusqlite_migration` temporarily disables foreign keys during migration, so they are re-enabled explicitly after.
-- **CSV format DSL** — `formats/*.yaml` files describe how to parse a bank's CSV: which cell holds the account number, which row is the header, and which columns map to which transaction fields. `format::load(name)` resolves by filename. To add a new bank, add a `formats/<bank>.yaml` and a fixture CSV in `tests/fixtures/`.
+- **CSV format DSL** — `specs/csv.yaml` is a YAML list of named format specs. Each entry has `date_format`, optional `invert_amount_sign`, and `columns` (each column maps a spreadsheet-style cell ref, e.g. `A`/`C`, plus a header-matching regex `expression`, to a transaction `field`). `ReaderSpec` scans rows until a record matches all column expressions, then uses that format for the remaining rows. To add a new bank, add an entry to `specs/csv.yaml` and a fixture CSV in `tests/fixtures/`.
 - **Async only for the server** — all other CLI commands are synchronous. A `tokio` runtime is created on demand inside the `Server` command branch; `main()` stays `fn main()`.
 - **`Arc<Mutex<Connection>>`** — rusqlite `Connection` is `Send` but not `Sync`. Wrapped in a `Mutex` for sharing across async Axum handlers; DB work runs inside `tokio::task::spawn_blocking`.
 - **Preact signals** — global filter signals live in `store.ts` (not `App.tsx`) to avoid a circular import: `App` imports the view components, which need the signals, so the signals must be in a file neither side imports. Components subscribe implicitly by reading `.value`. `effect()` (not `useEffect`) is used for data-fetching side effects so dependency tracking is automatic. Use `useSignal` (not `signal`) for signals created inside a component body.
