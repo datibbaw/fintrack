@@ -2,14 +2,19 @@ use anyhow::{anyhow, Result};
 use clap::{Parser, Subcommand};
 use std::io::{self, BufRead, Write};
 
+use crate::db::find_account;
+
 mod categorize;
 mod db;
-mod format;
 mod import;
 mod models;
 mod qif;
+mod readers;
 mod report;
 mod server;
+
+#[cfg(test)]
+mod test_util;
 
 // ── CLI definition ────────────────────────────────────────────────────────────
 
@@ -37,20 +42,10 @@ enum Commands {
 
     /// Import transactions from a CSV or QIF file
     Import {
-        /// Path to the file to import (.csv or .qif)
         file: String,
-        /// CSV format name — ignored for .qif files (must match a built-in format for CSV)
-        #[arg(long, default_value = "dbs")]
-        format: String,
-        /// Account number or name; required for .qif files (auto-detected from CSV if omitted)
+        /// Account number or name; required
         #[arg(long)]
-        account: Option<String>,
-        /// Bank name, used only when auto-creating a new account from a CSV
-        #[arg(long, default_value = "DBS")]
-        bank: String,
-        /// Currency fallback, used when the CSV format cannot detect it
-        #[arg(long, default_value = "SGD")]
-        currency: String,
+        account: String,
     },
 
     /// Manage spending categories
@@ -243,24 +238,20 @@ fn main() -> Result<()> {
         },
 
         // ── Import ────────────────────────────────────────────────────────────
-        Commands::Import {
-            file,
-            format,
-            account,
-            bank,
-            currency,
-        } => {
+        Commands::Import { file, account } => {
+            let account = find_account(&conn, &account)?
+                .ok_or_else(|| anyhow!("Account not found: '{account}'"))?;
             let result = if std::path::Path::new(&file)
                 .extension()
                 .is_some_and(|e| e.eq_ignore_ascii_case("qif"))
             {
-                import::import_qif(&conn, &file, account.as_deref())?
+                import::import_qif(&conn, &file, &account)?
             } else {
-                import::import_csv(&conn, &file, &format, account.as_deref(), &bank, &currency)?
+                import::import_csv(&conn, &account, &file)?
             };
             println!(
                 "Account : {} ({})\nImported: {}  |  Skipped (duplicates): {}",
-                result.account_name, result.account_number, result.imported, result.skipped,
+                account.name, account.number, result.imported, result.skipped,
             );
             if result.imported > 0 {
                 let categorized = categorize::apply_rules(&conn)?;

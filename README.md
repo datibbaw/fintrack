@@ -63,24 +63,26 @@ The resulting `fintrack` binary is self-contained — the entire web UI is embed
 ## Quick start
 
 ```bash
-# 1. Import a DBS CSV export (format auto-detected; account auto-created)
-fintrack import --format dbs ~/Downloads/statement.csv
+# 1. Add an account first (required before importing)
+fintrack account add "DBS Savings" --number 123-456789-0 --bank DBS --currency SGD
+fintrack account add "Amex Platinum" --number 3782-822463-10005 --bank Amex --currency SGD
 
-# Or import an Amex CSV (no account number in file, so --account is required)
-fintrack import --format amex --account "Amex Platinum" ~/Downloads/activity.csv
+# 2. Import a CSV export (format auto-detected from column headers)
+fintrack import --account "DBS Savings" ~/Downloads/statement.csv
+fintrack import --account "Amex Platinum" ~/Downloads/activity.csv
 
-# 2. Add some spending categories
+# 3. Add some spending categories
 fintrack category add Food
 fintrack category add "Dining Out" --parent Food
 fintrack category add Transport
 fintrack category add Utilities
 
-# 3. Add categorization rules (regex patterns)
+# 4. Add categorization rules (regex patterns)
 fintrack rule add "Dining Out" --pattern "(?i)grab food|foodpanda|mcdonalds|starbucks"
 fintrack rule add "Transport"  --pattern "(?i)grab|comfort delgro|ez-link|bus|mrt"
 fintrack rule add "Utilities"  --pattern "(?i)sp group|singapore power|m1|singtel|starhub"
 
-# 4. Open the web UI
+# 5. Open the web UI
 fintrack server
 ```
 
@@ -90,35 +92,42 @@ fintrack server
 
 ### Supported formats
 
-| `--format` | Bank | Notes |
-|---|---|---|
-| `dbs` | DBS / POSB | Auto-detects 8-, 9-, and 12-column export layouts; extracts account number and currency from the file |
-| `amex` | American Express | Single-column signed amount (positive = charge, negative = payment); requires `--account` |
+The CSV format is detected automatically by scanning column headers against the format definitions in `specs/csv.yaml`. No `--format` flag is needed.
+
+| Bank | Notes |
+|---|---|
+| DBS / POSB | Three export layouts (legacy account, current account, card); auto-detected |
+| American Express | Single signed `Amount` column (positive = charge, negative = payment) |
+
+### Before importing
+
+All imports require an existing account. Create one first if it doesn't exist:
+
+```bash
+fintrack account add "DBS Savings" --number 123-456789-0 --bank DBS --currency SGD
+```
 
 ### DBS / POSB
 
-Export your statement from DBS iBanking as a CSV. The format is detected automatically — the same `dbs` format handles savings, current, and credit card exports.
+Export your statement from DBS iBanking as a CSV. The layout is detected automatically.
 
 ```bash
-fintrack import --format dbs ~/Downloads/statement.csv
+fintrack import --account "DBS Savings" ~/Downloads/statement.csv
 ```
 
-If the account is new, it is created automatically using the name and number embedded in the CSV header. Re-importing the same file is safe; duplicate rows are silently skipped.
+Re-importing the same file is safe; duplicate rows are silently skipped.
 
 ### American Express
 
-Download your activity CSV from the Amex website (Activity > Download). Because Amex CSVs do not contain a card number, you must specify the account with `--account`. If the account doesn't exist yet, create it first:
+Download your activity CSV from the Amex website (Activity > Download).
 
 ```bash
-fintrack account add "Amex Platinum" --number 3782-822463-10005 --bank Amex --currency SGD
-fintrack import --format amex --account "Amex Platinum" ~/Downloads/activity.csv
+fintrack import --account "Amex Platinum" ~/Downloads/activity.csv
 ```
 
 Amex uses a single signed `Amount` column — positive values are stored as debits (charges), negative values as credits (payments and cashback).
 
 ### QIF files
-
-QIF files (exported by some banks and accounting tools) do not contain account information, so `--account` is always required:
 
 ```bash
 fintrack import --account "My Card" ~/Downloads/export.qif
@@ -126,14 +135,19 @@ fintrack import --account "My Card" ~/Downloads/export.qif
 
 ### Adding a new bank
 
-Each bank format is a small YAML file in `formats/`. The DSL lets you specify:
+Add a new entry to `specs/csv.yaml`. Each entry is a named format with:
 
-- How to locate the account number and currency in the file header (optional)
-- Which row contains the column headers, and which column maps to each transaction field
+- `name` — human-readable label (used in error messages)
+- `date_format` — strftime pattern (e.g. `'%d %b %Y'`)
+- `invert_amount_sign` — set `true` if the source CSV represents charges as positive (e.g. Amex)
+- `columns` — list of column mappings; each has:
+  - `column` — spreadsheet-style cell reference for the column (e.g. `A`, `C`, `AA`)
+  - `expression` — regex that must match the header cell to identify this layout
+  - `field` — one of: `date`, `description`, `code`, `ref1`, `ref2`, `ref3`, `status`, `debit`, `credit`, `amount`
 
-Fields available for column mappings: `date`, `description`, `code`, `ref1`, `ref2`, `ref3`, `status`, `debit`, `credit`, and `amount` (a signed column where positive → debit, negative → credit).
+`amount` is a signed field: negative values → debit, positive → credit (apply `invert_amount_sign: true` to flip).
 
-See `formats/dbs.yaml` and `formats/amex.yaml` for worked examples.
+See the existing entries in `specs/csv.yaml` for worked examples.
 
 ---
 
@@ -212,14 +226,19 @@ The UI has two views:
 
 ```
 src/
-  main.rs        — CLI (clap): all commands and subcommands
-  models.rs      — Plain structs: Account, Category, Rule
-  db.rs          — SQLite reads/writes (rusqlite); schema migrations
-  import.rs      — CSV/QIF parsing and dedup-import
-  categorize.rs  — Applies regex rules; highest priority wins
-  report.rs      — CLI table output (summary + transactions)
-  server.rs      — Axum HTTP server: JSON API + embedded static files
-  build.rs       — Tells Cargo to watch web/dist/ for changes
+  main.rs           — CLI (clap): all commands and subcommands
+  models/           — Plain structs: Account, Category, Rule, Transaction, TransactionBuilder
+  db.rs             — SQLite reads/writes (rusqlite); schema migrations
+  import.rs         — CSV/QIF parsing and dedup-import
+  readers/
+    csv/reader.rs   — CSV format DSL: loads specs/csv.yaml, detects format, parses rows
+  categorize.rs     — Applies regex rules; highest priority wins
+  report.rs         — CLI table output (summary + transactions)
+  server.rs         — Axum HTTP server: JSON API + embedded static files
+  build.rs          — Tells Cargo to watch web/dist/ for changes
+
+specs/
+  csv.yaml          — All supported CSV bank formats (unified list; rust-embedded)
 
 web/
   src/           — TypeScript + Preact source

@@ -1,0 +1,106 @@
+- name: 'DBS Account Legacy'
+  date_format: '%d %b %Y'
+  columns:
+    - column: A
+      expression: '^Transaction Date$'
+      field: date
+    - column: B
+      expression: '^Transaction Code$'
+      field: code
+    - column: C
+      expression: '^Description$'
+      field: description
+    - column: D
+      expression: '^Transaction Ref1$'
+      field: ref1
+    - column: E
+      expression: '^Transaction Ref2$'
+      field: ref2
+    - column: F
+      expression: '^Transaction Ref3$'
+      field: ref3
+    - column: G
+      expression: '^Status$'
+      field: status
+    - column: H
+      expression: '^Debit Amount$'
+      field: debit
+    - column: I
+      expression: '^Credit Amount$'
+      field: credit
+
+- name: 'DBS Account'
+  date_format: '%d %b %Y'
+  columns:
+    - column: A
+      expression: '^Transaction Date$'
+      field: date
+    - column: C
+      expression: '^Statement Code$'
+      field: code
+    - column: D
+      expression: '^Description$'
+      field: description
+    - column: E
+      expression: '^Supplementary Code$'
+      field: ref1
+    - column: F
+      expression: '^Supplementary Code Description$'
+      field: ref2
+    - column: G
+      expression: '^Client Reference$'
+      field: ref3
+    - column: I
+      expression: '^Status$'
+      field: status
+    - column: K
+      expression: '^Debit Amount$'
+      field: debit
+    - column: L
+      expression: '^Credit Amount$'
+      field: credit
+
+- name: 'DBS Card'
+  date_format: '%d %b %Y'
+  columns:
+    - column: A
+      expression: '^Transaction Date$'
+      field: date
+    - column: C
+      expression: '^Transaction Description$'
+      field: description
+    - column: D
+      expression: '^Transaction Type$'
+      field: ref1
+    - column: E
+      expression: '^Payment Type$'
+      field: ref2
+    - column: F
+      expression: '^Transaction Status$'
+      field: status
+    - column: G
+      expression: '^Debit Amount$'
+      field: debit
+    - column: H
+      expression: '^Credit Amount$'
+      field: credit
+
+- name: 'Amex'
+  date_format: '%m/%d/%Y'
+  invert_amount_sign: true # Amex exports payments as negative
+  columns:
+    - column: A
+      expression: '^Date$'
+      field: date
+    - column: B
+      expression: '^Description$'
+      field: description
+    - column: C
+      expression: '^Amount$'
+      field: amount
+    - column: D
+      expression: '^Extended Details$'
+      field: ref1
+    - column: J
+      expression: '^Reference$'
+      field: ref2
