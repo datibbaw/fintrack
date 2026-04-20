@@ -1,10 +1,10 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance to Claude Code (claude.ai/code) for this repo.
 
 # fintrack — Claude context
 
-Personal finance tracker. Imports bank CSVs (DBS and others via a YAML format DSL) and QIF files, categorises transactions with regex rules, and reports spending. A local web reporting UI is served via `fintrack server`.
+Personal finance tracker. Imports bank CSVs (DBS and others via YAML DSL) and QIF files, categorises transactions with regex rules, reports spending. Local web UI via `fintrack server`.
 
 ## Build, test & install
 
@@ -23,11 +23,11 @@ cd ..  && cargo build     # re-embeds the updated dist/
 cargo install --path .
 ```
 
-The `build.rs` script tells Cargo to recompile whenever `web/dist/` changes, so the two-step above is all that's needed.
+`build.rs` tells Cargo to recompile when `web/dist/` changes — two-step above is all needed.
 
 ### All-in-one binary (for use outside development)
 
-To produce a self-contained binary with all web assets baked in (no separate `web/` directory needed at runtime):
+Self-contained binary with all web assets baked in (no separate `web/` at runtime):
 
 ```bash
 cd web && npm run build   # compile frontend → web/dist/
@@ -35,7 +35,7 @@ cd ..
 cargo install --path .    # embeds web/dist/ and installs to ~/.cargo/bin/fintrack
 ```
 
-The resulting `~/.cargo/bin/fintrack` binary includes the full web UI via `rust-embed` and has no runtime dependencies beyond the SQLite database file (`~/.fintrack.db`). It can be copied to any machine with a compatible OS/architecture and run directly.
+`~/.cargo/bin/fintrack` includes full web UI via `rust-embed`. No runtime deps beyond `~/.fintrack.db`. Copy to any compatible machine and run directly.
 
 ## Project layout
 
@@ -79,15 +79,15 @@ web/
 
 ## Key architectural decisions
 
-- **SQLite only** — single `~/.fintrack.db` file (overridable via `--db` flag or `FINTRACK_DB` env var); WAL mode; foreign keys on. No ORM.
-- **rust-embed** — the entire `web/dist/` is baked into the binary at compile time. No separate asset deployment needed. `specs/csv.yaml` is also rust-embedded (into `readers/csv/reader.rs` via the `Specs` struct).
-- **Schema migrations** — managed by `rusqlite_migration`; SQL lives in `src/migrations/`. Add a new `M::up(include_str!(...))` entry to `db::migrations()` to add a migration. `rusqlite_migration` temporarily disables foreign keys during migration, so they are re-enabled explicitly after.
-- **CSV format DSL** — `specs/csv.yaml` is a YAML list of named format specs. Each entry has `date_format`, optional `invert_amount_sign`, and `columns` (each column maps a spreadsheet-style cell ref, e.g. `A`/`C`, plus a header-matching regex `expression`, to a transaction `field`). `ReaderSpec` scans rows until a record matches all column expressions, then uses that format for the remaining rows. To add a new bank, add an entry to `specs/csv.yaml` and a fixture CSV in `tests/fixtures/`.
-- **Async only for the server** — all other CLI commands are synchronous. A `tokio` runtime is created on demand inside the `Server` command branch; `main()` stays `fn main()`.
-- **`Arc<Mutex<Connection>>`** — rusqlite `Connection` is `Send` but not `Sync`. Wrapped in a `Mutex` for sharing across async Axum handlers; DB work runs inside `tokio::task::spawn_blocking`.
-- **Preact signals** — global filter signals live in `store.ts` (not `App.tsx`) to avoid a circular import: `App` imports the view components, which need the signals, so the signals must be in a file neither side imports. Components subscribe implicitly by reading `.value`. `effect()` (not `useEffect`) is used for data-fetching side effects so dependency tracking is automatic. Use `useSignal` (not `signal`) for signals created inside a component body.
-- **No router** — tab switching is a signal. One `<main>` swaps between `<Summary>` and `<Transactions>`.
-- **Client-side search** — the description/ref search in Transactions is applied client-side on the current page of results; category/date/account filters are server-side query params.
+- **SQLite only** — single `~/.fintrack.db` (overridable via `--db` or `FINTRACK_DB`); WAL mode; foreign keys on. No ORM.
+- **rust-embed** — entire `web/dist/` baked into binary at compile time. No separate asset deployment. `specs/csv.yaml` also rust-embedded into `readers/csv/reader.rs` via `Specs` struct.
+- **Schema migrations** — managed by `rusqlite_migration`; SQL in `src/migrations/`. Add `M::up(include_str!(...))` to `db::migrations()` for new migration. `rusqlite_migration` temporarily disables foreign keys during migration; re-enabled explicitly after.
+- **CSV format DSL** — `specs/csv.yaml` is YAML list of named format specs. Each entry has `date_format`, optional `invert_amount_sign`, and `columns` (maps spreadsheet-style cell ref e.g. `A`/`C` plus header-matching regex `expression` to transaction `field`). `ReaderSpec` scans rows until record matches all column expressions, then uses that format. To add new bank: add entry to `specs/csv.yaml` and fixture CSV in `tests/fixtures/`.
+- **Async only for server** — all other CLI commands synchronous. `tokio` runtime created on demand inside `Server` command branch; `main()` stays `fn main()`.
+- **`Arc<Mutex<Connection>>`** — rusqlite `Connection` is `Send` not `Sync`. Wrapped in `Mutex` for sharing across async Axum handlers; DB work runs inside `tokio::task::spawn_blocking`.
+- **Preact signals** — global filter signals in `store.ts` (not `App.tsx`) to avoid circular import: `App` imports view components, components need signals, so signals must be in file neither side imports. Components subscribe implicitly via `.value`. `effect()` (not `useEffect`) for data-fetching side effects — dependency tracking automatic. Use `useSignal` (not `signal`) for signals created inside component body.
+- **No router** — tab switching is signal. One `<main>` swaps between `<Summary>` and `<Transactions>`.
+- **Client-side search** — description/ref search in Transactions applied client-side on current page; category/date/account filters are server-side query params.
 
 ## API endpoints
 
@@ -100,7 +100,7 @@ All under `/api`:
 | GET | `/api/summary` | `from`, `to`, `account` |
 | GET | `/api/transactions` | `from`, `to`, `category`, `account`, `uncategorized`, `limit`, `offset` |
 
-Date params are `YYYY-MM-DD` strings; `account` matches by name or number; `limit` defaults to 100 for summary, 50 for transactions.
+Date params: `YYYY-MM-DD`. `account` matches by name or number. `limit` defaults to 100 for summary, 50 for transactions.
 
 ## Development workflow
 
@@ -113,7 +113,7 @@ cd web && npm run dev
 # Open http://localhost:3000 (Vite proxies /api → :7878)
 ```
 
-When iterating on UI only, there's no need to restart the Rust server.
+UI-only iteration: no need to restart Rust server.
 
 ## Database schema (summary)
 
@@ -125,11 +125,11 @@ transactions  (id, account_id, date, code, description, ref1, ref2, ref3,
 rules         (id, category_id, field, pattern, priority)
 ```
 
-`field` is one of: `description`, `ref1`, `ref2`, `ref3`, `code`, `any`.
+`field` one of: `description`, `ref1`, `ref2`, `ref3`, `code`, `any`.
 
 ## Things not yet built (potential next steps)
 
 - Admin UI (account/category/rule management) — intentionally deferred
-- Month-over-month comparison in the summary view
-- CSV export from the transactions view
+- Month-over-month comparison in summary view
+- CSV export from transactions view
 - Charts (spending trend over time)
