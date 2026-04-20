@@ -10,22 +10,17 @@ use serde::Deserialize;
 const CSV_SPEC: &str = "csv.yaml";
 
 #[derive(Deserialize)]
-pub struct FormatSpec {
+struct Format {
     date_format: String,
     #[serde(default)]
     invert_amount_sign: bool,
     columns: Vec<ColumnSpec>,
 }
 
-struct Meta<'a> {
-    date_format: &'a str,
-    invert_amount_sign: bool,
-    field: Field,
-}
-
-impl<'a> Meta<'a> {
-    fn parse_date(&self, value: &str) -> Option<NaiveDate> {
-        NaiveDate::parse_from_str(value, &self.date_format).ok()
+impl Format {
+    fn parse_date(&self, value: &str) -> Result<NaiveDate> {
+        NaiveDate::parse_from_str(value, &self.date_format)
+            .with_context(|| format!("failed to parse date: '{}'", value))
     }
 
     fn parse_amount(&self, value: &str) -> Option<f64> {
@@ -45,12 +40,12 @@ fn parse_money_value(s: &str) -> Result<f64> {
 }
 
 pub(super) fn parse<P: AsRef<Path>>(path: P) -> Result<Vec<TransactionBuilder>> {
-    let formats: Vec<FormatSpec> = specs::load(CSV_SPEC)?;
+    let formats: Vec<Format> = specs::load(CSV_SPEC)?;
     let mut reader = reader_from_path(&path)?;
     let format =
         detect_format(&formats, &mut reader)?.ok_or_else(|| anyhow!("Failed to detect format"))?;
 
-    parse_with_format(path, format)
+    parse_with_format(reader, format)
 }
 
 fn reader_from_path<P: AsRef<Path>>(path: P) -> Result<Reader<std::fs::File>> {
@@ -61,9 +56,9 @@ fn reader_from_path<P: AsRef<Path>>(path: P) -> Result<Reader<std::fs::File>> {
 }
 
 fn detect_format<'a>(
-    formats: &'a [FormatSpec],
+    formats: &'a [Format],
     reader: &mut Reader<impl std::io::Read>,
-) -> Result<Option<&'a FormatSpec>> {
+) -> Result<Option<&'a Format>> {
     while let Some(record) = reader.records().next() {
         let record = record?;
         if let Some(format) = formats.iter().find(|format| {
@@ -79,11 +74,7 @@ fn detect_format<'a>(
     Ok(None)
 }
 
-fn parse_with_format(
-    path: impl AsRef<Path>,
-    format: &FormatSpec,
-) -> Result<Vec<TransactionBuilder>> {
-    let mut reader = reader_from_path(path)?;
+fn parse_with_format(mut reader: Reader<impl std::io::Read>, format: &Format) -> Result<Vec<TransactionBuilder>> {
     let column_specs_by_index: HashMap<usize, &ColumnSpec> = format
         .columns
         .iter()
@@ -94,35 +85,28 @@ fn parse_with_format(
         .records()
         .map(|record| {
             let record = record?;
-            let cols = column_specs_by_index
+            let row = column_specs_by_index
                 .iter()
                 .filter_map(|(idx, col)| {
-                    record.get(*idx).map(|cell| {
-                        let meta = Meta {
-                            date_format: &format.date_format,
-                            invert_amount_sign: format.invert_amount_sign,
-                            field: col.field,
-                        };
-                        (meta, cell.trim().to_string())
-                    })
+                    record
+                        .get(*idx)
+                        .map(|cell| (col.field, cell.trim().to_string()))
                 })
                 .collect();
-            Ok(into_builder(Row(cols)))
+            Ok(into_builder(format, row)?)
         })
         .collect()
 }
 
-struct Row<'a>(Vec<(Meta<'a>, String)>);
+type Row = Vec<(Field, String)>;
 
-fn into_builder(row: Row) -> TransactionBuilder {
+fn into_builder(format: &Format, row: Row) -> Result<TransactionBuilder> {
     let mut builder = TransactionBuilder::default();
 
-    for (meta, value) in row.0 {
-        match meta.field {
+    for (field, value) in row {
+        match field {
             Field::Date => {
-                if let Some(date) = meta.parse_date(&value) {
-                    builder.date(date);
-                }
+                builder.date(format.parse_date(&value)?);
             }
             Field::Debit => {
                 builder.debit(parse_money_value(&value).ok());
@@ -131,7 +115,7 @@ fn into_builder(row: Row) -> TransactionBuilder {
                 builder.credit(parse_money_value(&value).ok());
             }
             Field::Amount => {
-                if let Some(n) = meta.parse_amount(&value) {
+                if let Some(n) = format.parse_amount(&value) {
                     builder.amount(n);
                 }
             }
@@ -156,7 +140,7 @@ fn into_builder(row: Row) -> TransactionBuilder {
         }
     }
 
-    builder
+    Ok(builder)
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq, Hash, Copy, Clone)]

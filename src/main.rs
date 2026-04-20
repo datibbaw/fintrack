@@ -8,7 +8,6 @@ mod categorize;
 mod db;
 mod import;
 mod models;
-mod qif;
 mod report;
 mod server;
 

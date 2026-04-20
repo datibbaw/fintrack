@@ -1,10 +1,9 @@
 use crate::models::{Account, Transaction};
-use crate::qif;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use rusqlite::Connection;
-use std::fs;
 
 mod csv;
+mod qif;
 mod specs;
 
 #[derive(Debug)]
@@ -12,9 +11,6 @@ pub struct ImportResult {
     pub imported: usize,
     pub skipped: usize,
 }
-
-/// TODO: support other date formats through e.g. qif specs
-pub const QIF_INPUT_DATE_FORMAT: &str = "%d/%m/%Y";
 
 /// Imports transactions from a CSV file using the ReaderSpec.
 pub fn import_csv<P: AsRef<std::path::Path>>(
@@ -44,13 +40,10 @@ pub fn import_qif<P: AsRef<std::path::Path>>(
     path: P,
     account: &Account,
 ) -> Result<ImportResult> {
-    let content = fs::read_to_string(&path)
-        .with_context(|| format!("cannot read file: {}", path.as_ref().to_string_lossy()))?;
-
-    let rows = qif::parse(&content, QIF_INPUT_DATE_FORMAT)?
+    let transactions = qif::parse(path)?
         .into_iter()
-        .filter_map(|tx| {
-            let res = qif::into_builder(tx).account_id(account.id).build();
+        .filter_map(|mut builder| {
+            let res = builder.account_id(account.id).build();
             if let Err(e) = &res {
                 eprintln!(
                     "Warning: failed to build transaction from QIF row, error: {:?}",
@@ -58,8 +51,9 @@ pub fn import_qif<P: AsRef<std::path::Path>>(
                 );
             }
             res.ok()
-        });
-    insert_transactions(conn, rows.collect())
+        })
+        .collect();
+    insert_transactions(conn, transactions)
 }
 
 fn insert_transactions(conn: &Connection, transactions: Vec<Transaction>) -> Result<ImportResult> {
