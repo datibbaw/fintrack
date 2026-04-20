@@ -14,7 +14,10 @@ use serde::{Deserialize, Serialize};
 
 use serde_rusqlite::from_rows;
 
-use crate::{db, models::Account};
+use crate::{
+    db,
+    models::{Account, Rule, Field},
+};
 
 // ── Embedded web assets ───────────────────────────────────────────────────────
 
@@ -58,9 +61,21 @@ pub struct CategoryDto {
 pub struct RuleDto {
     pub id: i64,
     pub category_id: i64,
-    pub field: String,
+    pub field: Field,
     pub pattern: String,
     pub priority: i64,
+}
+
+impl From<Rule> for RuleDto {
+    fn from(rule: Rule) -> Self {
+        RuleDto {
+            id: rule.id,
+            category_id: rule.category_id,
+            field: rule.field,
+            pattern: rule.pattern.as_str().to_string(),
+            priority: rule.priority,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -393,16 +408,7 @@ async fn api_category_rules(
     let result = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
         let conn = db.lock().map_err(|_| anyhow!("db lock poisoned"))?;
         let rules = db::list_rules_for_category(&conn, id)?;
-        Ok(rules
-            .into_iter()
-            .map(|r| RuleDto {
-                id: r.id,
-                category_id: r.category_id,
-                field: r.field,
-                pattern: r.pattern,
-                priority: r.priority,
-            })
-            .collect::<Vec<_>>())
+        Ok(rules.into_iter().map(Into::into).collect::<Vec<_>>())
     })
     .await
     .map_err(|e| anyhow!("thread error: {e}"))??;

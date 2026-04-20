@@ -1,118 +1,150 @@
 use anyhow::Result;
-use regex::Regex;
 use rusqlite::{params, Connection};
+use serde::Deserialize;
+use serde_rusqlite::from_rows;
 
-use crate::db;
+use crate::{
+    db,
+    models::Rule,
+};
 
-struct CompiledRule {
-    category_id: i64,
-    field: String,
-    pattern: Regex,
-    priority: i64,
-    /// True when this rule's category is a sub-category (has a parent).
-    /// Used as a secondary sort key so sub-category rules win ties against
-    /// parent catch-all rules at the same explicit priority.
-    is_sub: bool,
+#[derive(Deserialize)]
+struct TransactionRow {
+    id: i64,
+    code: String,
+    description: String,
+    ref1: String,
+    ref2: String,
+    ref3: String,
 }
 
-fn matches(
-    rule: &CompiledRule,
-    code: &str,
-    desc: &str,
-    ref1: &str,
-    ref2: &str,
-    ref3: &str,
-) -> bool {
-    match rule.field.as_str() {
-        "code" => rule.pattern.is_match(code),
-        "description" => rule.pattern.is_match(desc),
-        "ref1" => rule.pattern.is_match(ref1),
-        "ref2" => rule.pattern.is_match(ref2),
-        "ref3" => rule.pattern.is_match(ref3),
-        _ => {
-            // "any" — search all text fields
-            rule.pattern.is_match(code)
-                || rule.pattern.is_match(desc)
-                || rule.pattern.is_match(ref1)
-                || rule.pattern.is_match(ref2)
-                || rule.pattern.is_match(ref3)
+impl TransactionRow {
+    fn matches_rule(&self, rule: &Rule) -> bool {
+        use crate::models::Field::*;
+
+        match rule.field {
+            Code => rule.pattern.is_match(&self.code),
+            Description => rule.pattern.is_match(&self.description),
+            Ref1 => rule.pattern.is_match(&self.ref1),
+            Ref2 => rule.pattern.is_match(&self.ref2),
+            Ref3 => rule.pattern.is_match(&self.ref3),
+            Any => {
+                // "any" — search all text fields
+                rule.pattern.is_match(&self.code)
+                    || rule.pattern.is_match(&self.description)
+                    || rule.pattern.is_match(&self.ref1)
+                    || rule.pattern.is_match(&self.ref2)
+                    || rule.pattern.is_match(&self.ref3)
+            }
         }
     }
 }
-
 /// Re-apply all categorisation rules to every transaction.
 /// The highest-priority matching rule wins. Transactions with no match are left
 /// as-is (existing category_id is preserved unless a rule now matches).
 pub fn apply_rules(conn: &Connection) -> Result<usize> {
-    let raw = db::all_rules_with_depth(conn)?;
-
-    let rules: Vec<CompiledRule> = raw
-        .into_iter()
-        .filter_map(|r| match Regex::new(&r.pattern) {
-            Ok(re) => Some(CompiledRule {
-                category_id: r.category_id,
-                field: r.field,
-                pattern: re,
-                priority: r.priority,
-                is_sub: r.category_is_sub,
-            }),
-            Err(e) => {
-                eprintln!(
-                    "Warning: skipping rule #{} — invalid regex '{}': {e}",
-                    r.id, r.pattern
-                );
-                None
-            }
-        })
-        .collect();
+    let rules = db::all_rules_with_depth(conn)?;
 
     if rules.is_empty() {
         return Ok(0);
     }
 
-    struct TxRow {
-        id: i64,
-        code: String,
-        desc: String,
-        ref1: String,
-        ref2: String,
-        ref3: String,
-    }
-
     let mut stmt =
         conn.prepare("SELECT id, code, description, ref1, ref2, ref3 FROM transactions")?;
-    let txs: Vec<TxRow> = stmt
-        .query_map([], |row| {
-            Ok(TxRow {
-                id: row.get(0)?,
-                code: row.get(1)?,
-                desc: row.get(2)?,
-                ref1: row.get(3)?,
-                ref2: row.get(4)?,
-                ref3: row.get(5)?,
-            })
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    let transactions: Vec<TransactionRow> = from_rows(stmt.query([])?)
+        .collect::<serde_rusqlite::Result<Vec<_>>>()
+        .map_err(|e| anyhow::anyhow!("failed to query transactions: {e}"))?;
 
     let mut categorized = 0usize;
 
-    for tx in &txs {
+    for transaction in &transactions {
         // Pick the best matching rule: highest priority wins; sub-category rules
         // beat parent catch-all rules of equal priority so the more specific
         // assignment always takes precedence.
         let best = rules
             .iter()
-            .filter(|r| matches(r, &tx.code, &tx.desc, &tx.ref1, &tx.ref2, &tx.ref3))
-            .max_by_key(|r| (r.priority, r.is_sub));
+            .filter(|r| transaction.matches_rule(r))
+            .max_by_key(|r| (r.priority, r.category_is_sub));
 
         if let Some(rule) = best {
             conn.execute(
                 "UPDATE transactions SET category_id = ?1 WHERE id = ?2",
-                params![rule.category_id, tx.id],
+                params![rule.category_id, transaction.id],
             )?;
             categorized += 1;
         }
     }
 
     Ok(categorized)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::params;
+
+    fn test_conn() -> Connection {
+        crate::db::open(":memory:").expect("in-memory db")
+    }
+
+    #[test]
+    fn apply_rules_categorizes_matching_transaction() {
+        let conn = test_conn();
+
+        let account_id =
+            crate::db::add_account(&conn, "Test Bank", "ACC001", "TEST", "SGD").unwrap();
+        let cat_id = crate::db::add_category(&conn, "Food", None).unwrap();
+        crate::db::add_rule(&conn, cat_id, "description", "McDonald", 0).unwrap();
+
+        conn.execute(
+            "INSERT INTO transactions \
+             (account_id, date, code, description, ref1, ref2, ref3, status, debit, credit, hash) \
+             VALUES (?1, '2024-01-15', '', 'McDonald''s', '', '', '', '', 12.50, NULL, 'hash001')",
+            params![account_id],
+        )
+        .unwrap();
+
+        let categorized = apply_rules(&conn).unwrap();
+        assert_eq!(categorized, 1);
+
+        let assigned: i64 = conn
+            .query_row(
+                "SELECT category_id FROM transactions WHERE hash = 'hash001'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(assigned, cat_id);
+    }
+
+    #[test]
+    fn apply_rules_skips_non_matching_transaction() {
+        let conn = test_conn();
+
+        let account_id =
+            crate::db::add_account(&conn, "Test Bank", "ACC002", "TEST", "SGD").unwrap();
+        let cat_id = crate::db::add_category(&conn, "Transport", None).unwrap();
+        crate::db::add_rule(&conn, cat_id, "description", "Grab", 0).unwrap();
+
+        conn.execute(
+            "INSERT INTO transactions \
+             (account_id, date, code, description, ref1, ref2, ref3, status, debit, credit, hash) \
+             VALUES (?1, '2024-01-15', '', 'NTUC Fairprice', '', '', '', '', 30.00, NULL, 'hash002')",
+            params![account_id],
+        )
+        .unwrap();
+
+        let categorized = apply_rules(&conn).unwrap();
+        assert_eq!(categorized, 0);
+
+        let assigned: Option<i64> = conn
+            .query_row(
+                "SELECT category_id FROM transactions WHERE hash = 'hash002'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(assigned.is_none());
+    }
 }

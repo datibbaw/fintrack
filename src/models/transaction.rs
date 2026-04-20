@@ -1,9 +1,10 @@
 use derive_builder::Builder;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-#[derive(Debug, Clone, Builder, Serialize)]
+#[derive(Debug, Clone, Builder, Serialize, Deserialize)]
 pub struct Transaction {
+    #[builder(default)]
     pub account_id: i64,
     pub date: chrono::NaiveDate,
     #[builder(default)]
