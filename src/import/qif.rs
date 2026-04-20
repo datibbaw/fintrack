@@ -44,8 +44,7 @@ fn into_builder(tx: QifTransaction) -> TransactionBuilder {
 mod tests {
     use super::*;
 
-    const FIXTURE_PATH: &str =
-        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/qif_ccard.qif");
+    const FIXTURE_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/qif_ccard.qif");
 
     #[test]
     fn parse_row_count() {

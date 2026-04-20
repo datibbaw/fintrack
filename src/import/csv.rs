@@ -74,7 +74,10 @@ fn detect_format<'a>(
     Ok(None)
 }
 
-fn parse_with_format(mut reader: Reader<impl std::io::Read>, format: &Format) -> Result<Vec<TransactionBuilder>> {
+fn parse_with_format(
+    mut reader: Reader<impl std::io::Read>,
+    format: &Format,
+) -> Result<Vec<TransactionBuilder>> {
     let column_specs_by_index: HashMap<usize, &ColumnSpec> = format
         .columns
         .iter()
@@ -93,7 +96,7 @@ fn parse_with_format(mut reader: Reader<impl std::io::Read>, format: &Format) ->
                         .map(|cell| (col.field, cell.trim().to_string()))
                 })
                 .collect();
-            Ok(into_builder(format, row)?)
+            into_builder(format, row)
         })
         .collect()
 }
