@@ -1,9 +1,11 @@
 use crate::models::{Account, Transaction};
 use crate::qif;
-use crate::readers::csv::ReaderSpec;
 use anyhow::{Context, Result};
 use rusqlite::Connection;
 use std::fs;
+
+mod csv;
+mod specs;
 
 #[derive(Debug)]
 pub struct ImportResult {
@@ -20,23 +22,21 @@ pub fn import_csv<P: AsRef<std::path::Path>>(
     account: &Account,
     path: P,
 ) -> Result<ImportResult> {
-    let spec = ReaderSpec::new()?;
+    let transactions = csv::parse(&path)?
+        .into_iter()
+        .filter_map(|mut builder| {
+            let res = builder.account_id(account.id).build();
+            if let Err(e) = &res {
+                eprintln!(
+                    "Warning: failed to build transaction from CSV row, error: {:?}",
+                    e
+                );
+            }
+            res.ok()
+        })
+        .collect();
 
-    let rows = spec.rows(path)?.into_iter().filter_map(|row| {
-        let res = crate::readers::csv::into_builder(row)
-            .account_id(account.id)
-            .build();
-
-        if let Err(e) = &res {
-            eprintln!(
-                "Warning: failed to build transaction from row, error: {:?}",
-                e
-            );
-        }
-        res.ok()
-    });
-
-    insert_transactions(conn, rows.collect())
+    insert_transactions(conn, transactions)
 }
 
 pub fn import_qif<P: AsRef<std::path::Path>>(

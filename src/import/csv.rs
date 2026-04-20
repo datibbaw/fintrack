@@ -1,43 +1,36 @@
-use crate::models::TransactionBuilder;
+use std::{collections::HashMap, path::Path};
+
+use crate::{import::specs, models::TransactionBuilder};
 use anyhow::{anyhow, Context, Result};
 use chrono::NaiveDate;
 use csv::Reader;
 use regex::Regex;
-use rust_embed::RustEmbed;
 use serde::Deserialize;
 
 const CSV_SPEC: &str = "csv.yaml";
 
-#[derive(RustEmbed)]
-#[folder = "specs/"]
-struct Specs;
-
 #[derive(Deserialize)]
 pub struct FormatSpec {
-    // name: String,
     date_format: String,
     #[serde(default)]
     invert_amount_sign: bool,
     columns: Vec<ColumnSpec>,
 }
 
-pub struct ReaderSpec {
-    formats: Vec<FormatSpec>,
-}
-
 struct Meta<'a> {
-    format: &'a FormatSpec,
-    spec: &'a ColumnSpec,
+    date_format: &'a str,
+    invert_amount_sign: bool,
+    field: Field,
 }
 
-impl Meta<'_> {
+impl<'a> Meta<'a> {
     fn parse_date(&self, value: &str) -> Option<NaiveDate> {
-        NaiveDate::parse_from_str(value, &self.format.date_format).ok()
+        NaiveDate::parse_from_str(value, &self.date_format).ok()
     }
 
     fn parse_amount(&self, value: &str) -> Option<f64> {
         let value = parse_money_value(value).ok();
-        if self.format.invert_amount_sign {
+        if self.invert_amount_sign {
             value.map(|n| -n)
         } else {
             value
@@ -51,13 +44,81 @@ fn parse_money_value(s: &str) -> Result<f64> {
     })
 }
 
-pub struct Row<'a>(Vec<(Meta<'a>, String)>);
+pub(super) fn parse<P: AsRef<Path>>(path: P) -> Result<Vec<TransactionBuilder>> {
+    let formats: Vec<FormatSpec> = specs::load(CSV_SPEC)?;
+    let mut reader = reader_from_path(&path)?;
+    let format =
+        detect_format(&formats, &mut reader)?.ok_or_else(|| anyhow!("Failed to detect format"))?;
 
-pub(crate) fn into_builder(row: Row<'_>) -> TransactionBuilder {
+    parse_with_format(path, format)
+}
+
+fn reader_from_path<P: AsRef<Path>>(path: P) -> Result<Reader<std::fs::File>> {
+    Ok(csv::ReaderBuilder::new()
+        .has_headers(false)
+        .flexible(true)
+        .from_path(path)?)
+}
+
+fn detect_format<'a>(
+    formats: &'a [FormatSpec],
+    reader: &mut Reader<impl std::io::Read>,
+) -> Result<Option<&'a FormatSpec>> {
+    while let Some(record) = reader.records().next() {
+        let record = record?;
+        if let Some(format) = formats.iter().find(|format| {
+            format.columns.iter().all(|col| {
+                record
+                    .get(col.index())
+                    .is_some_and(|cell| col.expression.is_match(cell.trim()))
+            })
+        }) {
+            return Ok(Some(format));
+        }
+    }
+    Ok(None)
+}
+
+fn parse_with_format(
+    path: impl AsRef<Path>,
+    format: &FormatSpec,
+) -> Result<Vec<TransactionBuilder>> {
+    let mut reader = reader_from_path(path)?;
+    let column_specs_by_index: HashMap<usize, &ColumnSpec> = format
+        .columns
+        .iter()
+        .map(|col| (col.index(), col))
+        .collect();
+
+    reader
+        .records()
+        .map(|record| {
+            let record = record?;
+            let cols = column_specs_by_index
+                .iter()
+                .filter_map(|(idx, col)| {
+                    record.get(*idx).map(|cell| {
+                        let meta = Meta {
+                            date_format: &format.date_format,
+                            invert_amount_sign: format.invert_amount_sign,
+                            field: col.field,
+                        };
+                        (meta, cell.trim().to_string())
+                    })
+                })
+                .collect();
+            Ok(into_builder(Row(cols)))
+        })
+        .collect()
+}
+
+struct Row<'a>(Vec<(Meta<'a>, String)>);
+
+fn into_builder(row: Row) -> TransactionBuilder {
     let mut builder = TransactionBuilder::default();
 
     for (meta, value) in row.0 {
-        match meta.spec.field {
+        match meta.field {
             Field::Date => {
                 if let Some(date) = meta.parse_date(&value) {
                     builder.date(date);
@@ -96,74 +157,6 @@ pub(crate) fn into_builder(row: Row<'_>) -> TransactionBuilder {
     }
 
     builder
-}
-
-impl ReaderSpec {
-    pub fn new() -> Result<Self> {
-        let content = Specs::get(CSV_SPEC)
-            .ok_or_else(|| anyhow!("Spec {CSV_SPEC} not found"))?
-            .data;
-        let formats = serde_yaml::from_slice(&content)
-            .with_context(|| "failed to parse csv format: invalid YAML or missing fields")?;
-
-        Ok(Self { formats })
-    }
-
-    /// Scans records until it finds a matching header row and returns the corresponding format.
-    /// Leaves the reader positioned after the matched row, so consumed rows cannot be read again.
-    fn detect_format(
-        &self,
-        reader: &mut Reader<impl std::io::Read>,
-    ) -> Result<Option<&FormatSpec>> {
-        while let Some(record) = reader.records().next() {
-            let record = record?;
-            if let Some(format) = self.formats.iter().find(|format| {
-                format.columns.iter().all(|col| {
-                    record
-                        .get(col.index())
-                        .is_some_and(|cell| col.expression.is_match(cell.trim()))
-                })
-            }) {
-                return Ok(Some(format));
-            }
-        }
-        Ok(None)
-    }
-
-    pub fn rows(&self, path: impl AsRef<std::path::Path>) -> Result<Vec<Row<'_>>> {
-        let mut reader = csv::ReaderBuilder::new()
-            .has_headers(false)
-            .flexible(true)
-            .from_path(path)?;
-
-        match self.detect_format(&mut reader)? {
-            Some(format) => {
-                let column_specs_by_index: std::collections::HashMap<usize, &ColumnSpec> = format
-                    .columns
-                    .iter()
-                    .map(|col| (col.index(), col))
-                    .collect();
-
-                reader
-                    .records()
-                    .map(|record| {
-                        let record = record?;
-                        let cols = column_specs_by_index
-                            .iter()
-                            .filter_map(|(idx, col)| {
-                                record.get(*idx).map(|cell| {
-                                    let meta = Meta { format, spec: col };
-                                    (meta, cell.trim().to_string())
-                                })
-                            })
-                            .collect();
-                        Ok(Row(cols))
-                    })
-                    .collect()
-            }
-            None => Err(anyhow!("Failed to detect format")),
-        }
-    }
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq, Hash, Copy, Clone)]

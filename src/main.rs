@@ -9,7 +9,6 @@ mod db;
 mod import;
 mod models;
 mod qif;
-mod readers;
 mod report;
 mod server;
 
