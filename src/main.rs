@@ -43,7 +43,7 @@ enum Commands {
         file: String,
         /// Account number or name; required
         #[arg(long)]
-        account: String,
+        account: Option<String>,
     },
 
     /// Manage spending categories
@@ -237,19 +237,21 @@ fn main() -> Result<()> {
 
         // ── Import ────────────────────────────────────────────────────────────
         Commands::Import { file, account } => {
-            let account = find_account(&conn, &account)?
-                .ok_or_else(|| anyhow!("Account not found: '{account}'"))?;
             let result = if std::path::Path::new(&file)
                 .extension()
                 .is_some_and(|e| e.eq_ignore_ascii_case("qif"))
             {
+                let account =
+                    account.ok_or_else(|| anyhow!("Account must be specified for QIF import"))?;
+                let account = find_account(&conn, &account)?
+                    .ok_or_else(|| anyhow!("Account not found: '{account}'"))?;
                 import::import_qif(&conn, &file, &account)?
             } else {
-                import::import_csv(&conn, &account, &file)?
+                import::import_csv(&conn, &file, account, None)?
             };
             println!(
                 "Account : {} ({})\nImported: {}  |  Skipped (duplicates): {}",
-                account.name, account.number, result.imported, result.skipped,
+                result.account.name, result.account.number, result.imported, result.skipped,
             );
             if result.imported > 0 {
                 let categorized = categorize::apply_rules(&conn)?;

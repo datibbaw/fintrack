@@ -17,8 +17,8 @@ pub struct Transaction {
     pub ref3: String,
     #[builder(default)]
     pub status: String,
-    pub debit: Option<f64>,
-    pub credit: Option<f64>,
+    pub debit: Option<i64>,
+    pub credit: Option<i64>,
     #[builder(setter(skip), default = "self.compute_hash()")]
     pub hash: String,
 }
@@ -49,9 +49,9 @@ impl TransactionBuilder {
         hex::encode(h.finalize())
     }
 
-    pub fn amount(&mut self, n: f64) -> &mut Self {
-        if n < 0.0 {
-            self.debit(Some(-n));
+    pub fn amount(&mut self, n: i64) -> &mut Self {
+        if n < 0 {
+            self.debit(Some(n.abs()));
             self.credit(None);
         } else {
             self.credit(Some(n));

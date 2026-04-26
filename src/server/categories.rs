@@ -133,10 +133,7 @@ pub async fn update(
     Ok(StatusCode::NO_CONTENT)
 }
 
-pub async fn destroy(
-    State(db): State<Db>,
-    Path(id): Path<i64>,
-) -> Result<StatusCode, ApiError> {
+pub async fn destroy(State(db): State<Db>, Path(id): Path<i64>) -> Result<StatusCode, ApiError> {
     let db = Arc::clone(&db);
     tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
         let conn = db.lock().map_err(|_| anyhow!("db lock poisoned"))?;

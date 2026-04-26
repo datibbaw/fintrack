@@ -1,29 +1,80 @@
-use std::{collections::HashMap, path::Path};
+use std::path::Path;
 
 use crate::{import::specs, models::TransactionBuilder};
 use anyhow::{anyhow, Context, Result};
 use chrono::NaiveDate;
-use csv::Reader;
+use csv::{Reader, StringRecord};
 use regex::Regex;
 use serde::Deserialize;
 
 const CSV_SPEC: &str = "csv.yaml";
 
 #[derive(Deserialize)]
-struct Format {
+struct Spec {
+    account_number: Vec<ValueSpec>,
+    currency: Vec<ValueSpec>,
+    row_formats: Vec<RowFormat>,
+}
+
+pub(super) struct CsvMetadata {
+    pub(super) account_number: Option<String>,
+    pub(super) currency: Option<String>,
+}
+
+pub(super) struct TransactionRows {
+    records: csv::StringRecordsIntoIter<std::fs::File>,
+    row_format: RowFormat,
+}
+
+impl Iterator for TransactionRows {
+    type Item = Result<TransactionBuilder>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let record = self.records.next()?.map_err(anyhow::Error::from);
+        Some(record.and_then(|r| {
+            let row = r
+                .into_iter()
+                .enumerate()
+                .filter_map(|(idx, cell)| {
+                    let col = self.row_format.columns.iter().find(|c| c.index() == idx)?;
+                    Some((col.field, cell.trim().to_string()))
+                })
+                .collect();
+            into_builder(&self.row_format, row)
+        }))
+    }
+}
+
+/// ValueSpec defines how to extract a single value (e.g. account number) from the CSV file.
+#[derive(Deserialize)]
+struct ValueSpec {
+    condition: CellMatch,
+    value: CellMatch,
+}
+
+#[derive(Deserialize)]
+struct CellMatch {
+    location: String,
+    #[serde(with = "serde_regex")]
+    expression: Regex,
+}
+
+/// RowFormat defines how to detect and parse transaction rows in the CSV file.
+#[derive(Clone, Deserialize)]
+struct RowFormat {
     date_format: String,
     #[serde(default)]
     invert_amount_sign: bool,
     columns: Vec<ColumnSpec>,
 }
 
-impl Format {
+impl RowFormat {
     fn parse_date(&self, value: &str) -> Result<NaiveDate> {
         NaiveDate::parse_from_str(value, &self.date_format)
             .with_context(|| format!("failed to parse date: '{}'", value))
     }
 
-    fn parse_amount(&self, value: &str) -> Option<f64> {
+    fn parse_amount(&self, value: &str) -> Option<i64> {
         let value = parse_money_value(value).ok();
         if self.invert_amount_sign {
             value.map(|n| -n)
@@ -33,19 +84,46 @@ impl Format {
     }
 }
 
-fn parse_money_value(s: &str) -> Result<f64> {
-    s.trim().replace(',', "").parse::<f64>().with_context(|| {
-        format!("failed to parse money value: '{s}' (expected a number, optionally with commas)")
-    })
+impl CellMatch {
+    fn coordinate(&self) -> (usize, usize) {
+        parse_cell_ref(&self.location)
+    }
+
+    fn is_match(&self, data: &StringRecord, row_number: usize) -> bool {
+        let (col, row) = self.coordinate();
+        if row != row_number {
+            return false;
+        }
+        data.get(col)
+            .is_some_and(|cell| self.expression.is_match(cell.trim()))
+    }
+
+    fn resolve<'a>(&self, data: &'a StringRecord, row_number: usize) -> Option<&'a str> {
+        let (col, row) = self.coordinate();
+        if row != row_number {
+            return None;
+        }
+        let cell = data.get(col)?;
+        self.expression.captures(cell)?.get(1).map(|m| m.as_str())
+    }
 }
 
-pub(super) fn parse<P: AsRef<Path>>(path: P) -> Result<Vec<TransactionBuilder>> {
-    let formats: Vec<Format> = specs::load(CSV_SPEC)?;
-    let mut reader = reader_from_path(&path)?;
-    let format =
-        detect_format(&formats, &mut reader)?.ok_or_else(|| anyhow!("Failed to detect format"))?;
+enum SpecField<'a> {
+    AccountNumber(String),
+    RowFormat(&'a RowFormat),
+    Currency(String),
+}
 
-    parse_with_format(reader, format)
+fn parse_money_value(s: &str) -> Result<i64> {
+    s.replace(",", "")
+        .parse::<f64>()
+        .map(|f| (f * 100.0).round() as i64)
+        .map_err(|e| anyhow!("Failed to parse money value '{}': {}", s, e))
+}
+
+pub(super) fn parse<P: AsRef<Path>>(path: P) -> Result<(CsvMetadata, TransactionRows)> {
+    let spec: Spec = specs::load(CSV_SPEC)?;
+    spec.scan(path)
 }
 
 fn reader_from_path<P: AsRef<Path>>(path: P) -> Result<Reader<std::fs::File>> {
@@ -55,67 +133,102 @@ fn reader_from_path<P: AsRef<Path>>(path: P) -> Result<Reader<std::fs::File>> {
         .from_path(path)?)
 }
 
-fn detect_format<'a>(
-    formats: &'a [Format],
-    reader: &mut Reader<impl std::io::Read>,
-) -> Result<Option<&'a Format>> {
-    while let Some(record) = reader.records().next() {
-        let record = record?;
-        if let Some(format) = formats.iter().find(|format| {
+impl Spec {
+    fn parse_value_spec(
+        &self,
+        record: &StringRecord,
+        row_number: usize,
+        value_specs: &[ValueSpec],
+    ) -> Option<String> {
+        value_specs.iter().find_map(|value_spec| {
+            value_spec
+                .condition
+                .is_match(record, row_number)
+                .then(|| value_spec.value.resolve(record, row_number))
+                .flatten()
+                .map(|s| s.to_string())
+        })
+    }
+
+    fn parse_row_format(&self, record: &StringRecord) -> Option<&RowFormat> {
+        self.row_formats.iter().find(|format| {
             format.columns.iter().all(|col| {
                 record
                     .get(col.index())
                     .is_some_and(|cell| col.expression.is_match(cell.trim()))
             })
-        }) {
-            return Ok(Some(format));
-        }
-    }
-    Ok(None)
-}
-
-fn parse_with_format(
-    mut reader: Reader<impl std::io::Read>,
-    format: &Format,
-) -> Result<Vec<TransactionBuilder>> {
-    let column_specs_by_index: HashMap<usize, &ColumnSpec> = format
-        .columns
-        .iter()
-        .map(|col| (col.index(), col))
-        .collect();
-
-    reader
-        .records()
-        .map(|record| {
-            let record = record?;
-            let row = column_specs_by_index
-                .iter()
-                .filter_map(|(idx, col)| {
-                    record
-                        .get(*idx)
-                        .map(|cell| (col.field, cell.trim().to_string()))
-                })
-                .collect();
-            into_builder(format, row)
         })
-        .collect()
+    }
+
+    fn parse_spec_field<'a>(
+        &'a self,
+        record: &StringRecord,
+        row_number: usize,
+    ) -> Option<SpecField<'a>> {
+        if let Some(row_format) = self.parse_row_format(record) {
+            return Some(SpecField::RowFormat(row_format));
+        }
+        if let Some(n) = self.parse_value_spec(record, row_number, &self.account_number) {
+            return Some(SpecField::AccountNumber(n));
+        }
+        if let Some(c) = self.parse_value_spec(record, row_number, &self.currency) {
+            return Some(SpecField::Currency(c));
+        }
+        None
+    }
+
+    fn scan<P: AsRef<Path>>(&self, path: P) -> Result<(CsvMetadata, TransactionRows)> {
+        let mut reader = reader_from_path(path)?;
+        let mut metadata = CsvMetadata {
+            account_number: None,
+            currency: None,
+        };
+        let mut row_format: Option<RowFormat> = None;
+
+        for (row_number, record) in reader.records().enumerate() {
+            let record = record?;
+
+            match self.parse_spec_field(&record, row_number) {
+                Some(SpecField::RowFormat(fmt)) => {
+                    row_format = Some(fmt.clone());
+                    break;
+                }
+                Some(SpecField::AccountNumber(n)) => metadata.account_number = Some(n),
+                Some(SpecField::Currency(c)) => metadata.currency = Some(c),
+                None => {}
+            }
+        }
+
+        let row_format =
+            row_format.ok_or_else(|| anyhow!("no matching row format found in CSV"))?;
+        let rows = TransactionRows {
+            records: reader.into_records(),
+            row_format,
+        };
+
+        Ok((metadata, rows))
+    }
 }
 
 type Row = Vec<(Field, String)>;
 
-fn into_builder(format: &Format, row: Row) -> Result<TransactionBuilder> {
+fn into_builder(format: &RowFormat, row: Row) -> Result<TransactionBuilder> {
     let mut builder = TransactionBuilder::default();
 
     for (field, value) in row {
         match field {
             Field::Date => {
-                builder.date(format.parse_date(&value)?);
+                builder.date(
+                    format
+                        .parse_date(&value)
+                        .map_err(|e| anyhow!("Failed to parse date: {}", e))?,
+                );
             }
             Field::Debit => {
-                builder.debit(parse_money_value(&value).ok());
+                builder.debit(parse_money_value(&value).ok().map(|c| c.abs()));
             }
             Field::Credit => {
-                builder.credit(parse_money_value(&value).ok());
+                builder.credit(parse_money_value(&value).ok().map(|c| c.abs()));
             }
             Field::Amount => {
                 if let Some(n) = format.parse_amount(&value) {
@@ -161,7 +274,7 @@ enum Field {
     Amount, // auto detect debit vs credit based on sign
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 struct ColumnSpec {
     column: String,
     #[serde(with = "serde_regex")]
@@ -181,7 +294,6 @@ fn parse_cell_ref(s: &str) -> (usize, usize) {
 
     for c in s.chars() {
         if c.is_ascii_alphabetic() {
-            // Convert 'A' -> 1, 'B' -> 2, etc. (Base 26)
             col = col * 26 + (c.to_ascii_uppercase() as usize - 'A' as usize + 1);
         } else if c.is_ascii_digit() {
             row_str.push(c);

@@ -1,5 +1,8 @@
-use crate::models::{Account, Transaction};
-use anyhow::Result;
+use crate::{
+    db::find_account,
+    models::{Account, Transaction},
+};
+use anyhow::{anyhow, Result};
 use rusqlite::Connection;
 
 mod csv;
@@ -8,6 +11,7 @@ mod specs;
 
 #[derive(Debug)]
 pub struct ImportResult {
+    pub account: Account,
     pub imported: usize,
     pub skipped: usize,
 }
@@ -15,24 +19,69 @@ pub struct ImportResult {
 /// Imports transactions from a CSV file using the ReaderSpec.
 pub fn import_csv<P: AsRef<std::path::Path>>(
     conn: &Connection,
-    account: &Account,
     path: P,
+    account_number: Option<String>,
+    currency: Option<String>,
 ) -> Result<ImportResult> {
-    let transactions = csv::parse(&path)?
-        .into_iter()
-        .filter_map(|mut builder| {
-            let res = builder.account_id(account.id).build();
-            if let Err(e) = &res {
-                eprintln!(
-                    "Warning: failed to build transaction from CSV row, error: {:?}",
-                    e
+    let (metadata, rows) = csv::parse(path)?;
+
+    let account = match (account_number, metadata.account_number) {
+        (Some(num), Some(file_num)) if num != file_num => {
+            anyhow::bail!(
+                "account number mismatch: file has '{}', argument is '{}'",
+                file_num,
+                num
+            );
+        }
+        (Some(num), _) => {
+            find_account(conn, &num)?.ok_or_else(|| anyhow!("Account not found: '{num}'"))?
+        }
+        (None, Some(file_num)) => find_account(conn, &file_num)?
+            .ok_or_else(|| anyhow!("Account not found: '{file_num}'"))?,
+        (None, None) => {
+            anyhow::bail!(
+                "Account number must be specified either as a command-line argument or in the file"
+            );
+        }
+    };
+
+    if let Some(file_currency) = metadata.currency {
+        if let Some(arg_currency) = currency {
+            if file_currency != arg_currency {
+                anyhow::bail!(
+                    "currency mismatch: file has '{}', argument is '{}'",
+                    file_currency,
+                    arg_currency
                 );
             }
-            res.ok()
-        })
-        .collect();
+        } else if account.currency != file_currency {
+            anyhow::bail!(
+                "currency mismatch: file has '{}', but account '{}' has currency '{}'",
+                file_currency,
+                account.name,
+                account.currency
+            );
+        }
+    }
 
-    insert_transactions(conn, transactions)
+    let mut importer = Importer::new(conn, account);
+    for result in rows {
+        let mut builder = match result {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("Warning: failed to parse CSV row, error: {:?}", e);
+                continue;
+            }
+        };
+        match builder.account_id(importer.account.id).build() {
+            Ok(t) => importer.insert(t)?,
+            Err(e) => eprintln!(
+                "Warning: failed to build transaction from CSV row, error: {:?}",
+                e
+            ),
+        }
+    }
+    Ok(importer.finish())
 }
 
 pub fn import_qif<P: AsRef<std::path::Path>>(
@@ -40,59 +89,76 @@ pub fn import_qif<P: AsRef<std::path::Path>>(
     path: P,
     account: &Account,
 ) -> Result<ImportResult> {
-    let transactions = qif::parse(path)?
-        .into_iter()
-        .filter_map(|mut builder| {
-            let res = builder.account_id(account.id).build();
-            if let Err(e) = &res {
-                eprintln!(
-                    "Warning: failed to build transaction from QIF row, error: {:?}",
-                    e
-                );
-            }
-            res.ok()
-        })
-        .collect();
-    insert_transactions(conn, transactions)
+    let mut importer = Importer::new(conn, account.clone());
+    for mut builder in qif::parse(path)? {
+        match builder.account_id(account.id).build() {
+            Ok(t) => importer.insert(t)?,
+            Err(e) => eprintln!(
+                "Warning: failed to build transaction from QIF row, error: {:?}",
+                e
+            ),
+        }
+    }
+    Ok(importer.finish())
 }
 
-fn insert_transactions(conn: &Connection, transactions: Vec<Transaction>) -> Result<ImportResult> {
-    let mut imported = 0usize;
-    let mut skipped = 0usize;
+struct Importer<'a> {
+    conn: &'a Connection,
+    account: Account,
+    imported: usize,
+    skipped: usize,
+}
 
-    for t in transactions {
-        let params = serde_rusqlite::to_params_named(&t)?;
-        let n = conn.execute(
-            "INSERT OR IGNORE INTO transactions \
-             (account_id, date, code, description, ref1, ref2, ref3, status, debit, credit, hash) \
-             VALUES (:account_id, :date, :code, :description, :ref1, :ref2, :ref3, :status, :debit, :credit, :hash)",
-             params.to_slice().as_slice(),
-        )?;
-
-        if n == 1 {
-            imported += 1;
-        } else {
-            skipped += 1;
+impl<'a> Importer<'a> {
+    fn new(conn: &'a Connection, account: Account) -> Self {
+        Self {
+            conn,
+            account,
+            imported: 0,
+            skipped: 0,
         }
     }
 
-    Ok(ImportResult { imported, skipped })
+    fn insert(&mut self, t: Transaction) -> Result<()> {
+        let params = serde_rusqlite::to_params_named(&t)?;
+        let n = self.conn.execute(
+            "INSERT OR IGNORE INTO transactions \
+             (account_id, date, code, description, ref1, ref2, ref3, status, debit, credit, hash) \
+             VALUES (:account_id, :date, :code, :description, :ref1, :ref2, :ref3, :status, :debit, :credit, :hash)",
+            params.to_slice().as_slice(),
+        )?;
+        if n == 1 {
+            self.imported += 1;
+        } else {
+            self.skipped += 1;
+        }
+        Ok(())
+    }
+
+    fn finish(self) -> ImportResult {
+        ImportResult {
+            account: self.account,
+            imported: self.imported,
+            skipped: self.skipped,
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::db;
-    use crate::test_util::create_account;
+    use crate::test_util::{create_account, create_account_with_currency};
 
-    /// Open a fresh SQLite database in a temp directory.
-    /// The returned `TempDir` must stay alive for the duration of the test;
-    /// dropping it deletes the directory and the database inside it.
     fn tmp_conn() -> (tempfile::TempDir, Connection) {
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("test.db");
         let conn = db::open(path.to_str().unwrap()).unwrap();
         (dir, conn)
+    }
+
+    fn csv(conn: &Connection, path: &str, number: &str) -> Result<ImportResult> {
+        import_csv(conn, path, Some(number.to_string()), None)
     }
 
     // ── 9-column savings/current ──────────────────────────────────────────────
@@ -101,15 +167,14 @@ mod tests {
     fn import_9col_creates_transactions_using_import() {
         let (_dir, conn) = tmp_conn();
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/dbs_9col.csv");
+        create_account(&conn, "000-11111-1", "Test Savings").unwrap();
 
-        let account = create_account(&conn, "541", "My Card").unwrap();
-
-        let result = import_csv(&conn, &account, path).unwrap();
+        let result = csv(&conn, path, "000-11111-1").unwrap();
 
         assert_eq!(result.imported, 4);
         assert_eq!(result.skipped, 0);
 
-        let (credit, ref1): (Option<f64>, String) = conn
+        let (credit, ref1): (Option<i64>, String) = conn
             .query_row(
                 "SELECT credit, ref1 FROM transactions WHERE description LIKE 'EMPLOYER CO%'",
                 [],
@@ -117,7 +182,7 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(credit, Some(3500.0));
+        assert_eq!(credit, Some(350000));
         assert_eq!(ref1, "EMPLOYER CO");
     }
 
@@ -125,10 +190,10 @@ mod tests {
     fn import_9col_date_and_fields_stored_correctly() {
         let (_dir, conn) = tmp_conn();
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/dbs_9col.csv");
-        let account = create_account(&conn, "000-11111-1", "Test Savings").unwrap();
-        import_csv(&conn, &account, path).unwrap();
+        create_account(&conn, "000-11111-1", "Test Savings").unwrap();
+        csv(&conn, path, "000-11111-1").unwrap();
 
-        let (date, ref1, debit, credit): (String, String, Option<f64>, Option<f64>) = conn
+        let (date, ref1, debit, credit): (String, String, Option<i64>, Option<i64>) = conn
             .query_row(
                 "SELECT date, ref1, debit, credit FROM transactions WHERE code = 'SAL'",
                 [],
@@ -136,10 +201,10 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(date, "2024-12-15"); // "15 Dec 2024" → ISO-8601
+        assert_eq!(date, "2024-12-15");
         assert_eq!(ref1, "EMPLOYER CO");
         assert_eq!(debit, None);
-        assert_eq!(credit, Some(3500.0));
+        assert_eq!(credit, Some(350000));
     }
 
     // ── 8-column credit card ──────────────────────────────────────────────────
@@ -148,9 +213,9 @@ mod tests {
     fn import_cc_creates_account_and_transactions() {
         let (_dir, conn) = tmp_conn();
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/dbs_cc.csv");
-        let account = create_account(&conn, "0000-1111-2222-3333", "DBS Test Card").unwrap();
+        create_account(&conn, "0000-1111-2222-3333", "DBS Test Card").unwrap();
 
-        let result = import_csv(&conn, &account, path).unwrap();
+        let result = csv(&conn, path, "0000-1111-2222-3333").unwrap();
 
         assert_eq!(result.imported, 4);
         assert_eq!(result.skipped, 0);
@@ -160,10 +225,10 @@ mod tests {
     fn import_cc_autopay_credit_stored_correctly() {
         let (_dir, conn) = tmp_conn();
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/dbs_cc.csv");
-        let account = create_account(&conn, "0000-1111-2222-3333", "DBS Test Card").unwrap();
-        import_csv(&conn, &account, path).unwrap();
+        create_account(&conn, "0000-1111-2222-3333", "DBS Test Card").unwrap();
+        csv(&conn, path, "0000-1111-2222-3333").unwrap();
 
-        let (credit, ref1): (Option<f64>, String) = conn
+        let (credit, ref1): (Option<i64>, String) = conn
             .query_row(
                 "SELECT credit, ref1 FROM transactions WHERE description LIKE 'AUTOPAY%'",
                 [],
@@ -171,8 +236,8 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(credit, Some(450.25));
-        assert_eq!(ref1, "PAYMENT"); // Transaction Type maps to ref1
+        assert_eq!(credit, Some(45025));
+        assert_eq!(ref1, "PAYMENT");
     }
 
     // ── 12-column statement code format ──────────────────────────────────────
@@ -181,9 +246,9 @@ mod tests {
     fn import_12col_creates_account_and_transactions() {
         let (_dir, conn) = tmp_conn();
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/dbs_12col.csv");
-        let account = create_account(&conn, "000-33333-3", "Test Multiplier").unwrap();
+        create_account(&conn, "000-33333-3", "Test Multiplier").unwrap();
 
-        let result = import_csv(&conn, &account, path).unwrap();
+        let result = csv(&conn, path, "000-33333-3").unwrap();
 
         assert_eq!(result.imported, 3);
         assert_eq!(result.skipped, 0);
@@ -193,8 +258,8 @@ mod tests {
     fn import_12col_fields_stored_correctly() {
         let (_dir, conn) = tmp_conn();
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/dbs_12col.csv");
-        let account = create_account(&conn, "000-33333-3", "Test Multiplier").unwrap();
-        import_csv(&conn, &account, path).unwrap();
+        create_account(&conn, "000-33333-3", "Test Multiplier").unwrap();
+        csv(&conn, path, "000-33333-3").unwrap();
 
         let (code, description, ref3): (String, String, String) = conn
             .query_row(
@@ -206,22 +271,22 @@ mod tests {
 
         assert_eq!(code, "SAL");
         assert_eq!(description, "EMPLOYER CO PAYROLL DEC2024");
-        assert_eq!(ref3, "REF001"); // Client Reference
+        assert_eq!(ref3, "REF001");
     }
 
-    // ── Cross-cutting: deduplication and auto-account creation ────────────────
+    // ── Cross-cutting: deduplication ─────────────────────────────────────────
 
     #[test]
     fn import_dedup_skips_on_reimport() {
         let (_dir, conn) = tmp_conn();
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/dbs_9col.csv");
-        let account = create_account(&conn, "000-11111-1", "Test Savings").unwrap();
+        create_account(&conn, "000-11111-1", "Test Savings").unwrap();
 
-        let first = import_csv(&conn, &account, path).unwrap();
+        let first = csv(&conn, path, "000-11111-1").unwrap();
         assert_eq!(first.imported, 4);
         assert_eq!(first.skipped, 0);
 
-        let second = import_csv(&conn, &account, path).unwrap();
+        let second = csv(&conn, path, "000-11111-1").unwrap();
         assert_eq!(second.imported, 0);
         assert_eq!(second.skipped, 4);
     }
@@ -232,8 +297,8 @@ mod tests {
     fn import_qif_imports_into_existing_account() {
         let (_dir, conn) = tmp_conn();
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/qif_ccard.qif");
-
         let account = create_account(&conn, "541", "My Card").unwrap();
+
         let result = import_qif(&conn, path, &account).unwrap();
 
         assert_eq!(result.imported, 4);
@@ -247,8 +312,7 @@ mod tests {
         let account = create_account(&conn, "541", "My Card").unwrap();
         import_qif(&conn, path, &account).unwrap();
 
-        // Debit transaction (T-39.00)
-        let (debit, credit, description): (Option<f64>, Option<f64>, String) = conn
+        let (debit, credit, description): (Option<i64>, Option<i64>, String) = conn
             .query_row(
                 "SELECT debit, credit, description FROM transactions \
                  WHERE description = 'SASCO SENIOR CITIZENS SINGAPORE SG' \
@@ -257,12 +321,11 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(debit, Some(39.0));
+        assert_eq!(debit, Some(3900));
         assert_eq!(credit, None);
         assert!(!description.is_empty());
 
-        // Credit transaction (T39.00)
-        let (debit, credit): (Option<f64>, Option<f64>) = conn
+        let (debit, credit): (Option<i64>, Option<i64>) = conn
             .query_row(
                 "SELECT debit, credit FROM transactions WHERE description = 'INBOUND FT PYMT' LIMIT 1",
                 [],
@@ -270,7 +333,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(debit, None);
-        assert_eq!(credit, Some(39.0));
+        assert_eq!(credit, Some(3900));
     }
 
     // ── Amex ──────────────────────────────────────────────────────────────────
@@ -279,12 +342,12 @@ mod tests {
     fn import_amex_debit_and_credit_stored_correctly() {
         let (_dir, conn) = tmp_conn();
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/amex.csv");
-        let account = create_account(&conn, "378282246310005", "Amex Platinum").unwrap();
-        let result = import_csv(&conn, &account, path).unwrap();
+        create_account(&conn, "378282246310005", "Amex Platinum").unwrap();
+
+        let result = csv(&conn, path, "378282246310005").unwrap();
         assert_eq!(result.imported, 3);
 
-        // Charge: positive amount → debit
-        let (debit, credit, date): (Option<f64>, Option<f64>, String) = conn
+        let (debit, credit, date): (Option<i64>, Option<i64>, String) = conn
             .query_row(
                 "SELECT debit, credit, date FROM transactions \
                  WHERE description LIKE 'SINGAPOREAIR%'",
@@ -292,12 +355,11 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(debit, Some(6123.80));
+        assert_eq!(debit, Some(612380));
         assert_eq!(credit, None);
-        assert_eq!(date, "2026-04-11"); // MM/DD/YYYY → ISO-8601
+        assert_eq!(date, "2026-04-11");
 
-        // Payment: negative amount → credit
-        let (debit, credit): (Option<f64>, Option<f64>) = conn
+        let (debit, credit): (Option<i64>, Option<i64>) = conn
             .query_row(
                 "SELECT debit, credit FROM transactions \
                  WHERE description LIKE 'AMT DEBITED%'",
@@ -306,22 +368,43 @@ mod tests {
             )
             .unwrap();
         assert_eq!(debit, None);
-        assert_eq!(credit, Some(606.01));
+        assert_eq!(credit, Some(60601));
     }
 
     #[test]
     fn import_amex_dedup_skips_on_reimport() {
         let (_dir, conn) = tmp_conn();
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/amex.csv");
-        let account = create_account(&conn, "378282246310005", "Amex Platinum").unwrap();
+        create_account(&conn, "378282246310005", "Amex Platinum").unwrap();
 
-        let first = import_csv(&conn, &account, path).unwrap();
+        let first = csv(&conn, path, "378282246310005").unwrap();
         assert_eq!(first.imported, 3);
         assert_eq!(first.skipped, 0);
 
-        let second = import_csv(&conn, &account, path).unwrap();
+        let second = csv(&conn, path, "378282246310005").unwrap();
         assert_eq!(second.imported, 0);
         assert_eq!(second.skipped, 3);
+    }
+
+    // ── Conflict checks ───────────────────────────────────────────────────────
+
+    #[test]
+    fn import_csv_fails_on_account_number_mismatch() {
+        let (_dir, conn) = tmp_conn();
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/dbs_9col.csv");
+        // file has account number 000-11111-1; pass a different number
+        let err = import_csv(&conn, path, Some("wrong-number".to_string()), None).unwrap_err();
+        assert!(err.to_string().contains("account number mismatch"), "{err}");
+    }
+
+    #[test]
+    fn import_csv_fails_on_currency_mismatch() {
+        let (_dir, conn) = tmp_conn();
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/dbs_9col.csv");
+        // file has currency SGD; account has USD
+        create_account_with_currency(&conn, "000-11111-1", "Test", "USD").unwrap();
+        let err = import_csv(&conn, path, Some("000-11111-1".to_string()), None).unwrap_err();
+        assert!(err.to_string().contains("currency mismatch"), "{err}");
     }
 
     #[test]

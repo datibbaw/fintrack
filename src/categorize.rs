@@ -3,10 +3,7 @@ use rusqlite::{params, Connection};
 use serde::Deserialize;
 use serde_rusqlite::from_rows;
 
-use crate::{
-    db,
-    models::Rule,
-};
+use crate::{db, models::Rule};
 
 #[derive(Deserialize)]
 struct TransactionRow {
@@ -100,7 +97,7 @@ mod tests {
         conn.execute(
             "INSERT INTO transactions \
              (account_id, date, code, description, ref1, ref2, ref3, status, debit, credit, hash) \
-             VALUES (?1, '2024-01-15', '', 'McDonald''s', '', '', '', '', 12.50, NULL, 'hash001')",
+             VALUES (?1, '2024-01-15', '', 'McDonald''s', '', '', '', '', 1250, NULL, 'hash001')",
             params![account_id],
         )
         .unwrap();
@@ -130,7 +127,7 @@ mod tests {
         conn.execute(
             "INSERT INTO transactions \
              (account_id, date, code, description, ref1, ref2, ref3, status, debit, credit, hash) \
-             VALUES (?1, '2024-01-15', '', 'NTUC Fairprice', '', '', '', '', 30.00, NULL, 'hash002')",
+             VALUES (?1, '2024-01-15', '', 'NTUC Fairprice', '', '', '', '', 3000, NULL, 'hash002')",
             params![account_id],
         )
         .unwrap();

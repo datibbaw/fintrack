@@ -1,23 +1,42 @@
 use anyhow::Result;
-use rusqlite::{params, Connection};
+use rusqlite::{functions::FunctionFlags, params, Connection};
 use rusqlite_migration::{Migrations, M};
 use serde_rusqlite::{from_row, from_rows};
+use sha2::{Digest, Sha256};
 
 use crate::models::{Account, Category, Rule};
 
 pub fn open(path: &str) -> Result<Connection> {
     let mut conn = Connection::open(path)?;
     conn.execute_batch("PRAGMA journal_mode=WAL;")?;
+    register_functions(&conn)?;
     migrations().to_latest(&mut conn)?;
     // rusqlite_migration temporarily disables foreign keys; re-enable after migration.
     conn.execute_batch("PRAGMA foreign_keys=ON;")?;
     Ok(conn)
 }
 
+fn register_functions(conn: &Connection) -> Result<()> {
+    conn.create_scalar_function(
+        "fintrack_sha256",
+        1,
+        FunctionFlags::SQLITE_DETERMINISTIC | FunctionFlags::SQLITE_INNOCUOUS,
+        |ctx: &rusqlite::functions::Context<'_>| {
+            let input: String = ctx.get(0)?;
+            let mut h = Sha256::new();
+            h.update(input.as_bytes());
+            Ok(hex::encode(h.finalize()))
+        },
+    )?;
+    Ok(())
+}
+
 fn migrations() -> Migrations<'static> {
-    Migrations::new(vec![M::up(include_str!(
-        "migrations/01_initial_schema.sql"
-    ))])
+    Migrations::new(vec![
+        M::up(include_str!("migrations/01_initial_schema.sql")),
+        M::up(include_str!("migrations/02_amounts_to_cents.sql")),
+        M::up(include_str!("migrations/03_rehash_transactions.sql")),
+    ])
 }
 
 // ── Query helpers ─────────────────────────────────────────────────────────────
@@ -78,12 +97,12 @@ pub fn list_accounts(conn: &Connection) -> Result<Vec<Account>> {
     Ok(rows)
 }
 
-pub fn find_account(conn: &Connection, number_or_name: &str) -> Result<Option<Account>> {
+pub fn find_account(conn: &Connection, number: &str) -> Result<Option<Account>> {
     let mut stmt = conn.prepare(
         "SELECT id, name, number, bank, currency \
-         FROM accounts WHERE number = ?1 OR name = ?1 LIMIT 1",
+         FROM accounts WHERE number = ?1 LIMIT 1",
     )?;
-    let mut rows = stmt.query(params![number_or_name])?;
+    let mut rows = stmt.query(params![number])?;
     Ok(match rows.next()? {
         Some(row) => Some(from_row::<Account>(row)?),
         None => None,

@@ -1,7 +1,10 @@
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use axum::{extract::{Query, State}, Json};
+use axum::{
+    extract::{Query, State},
+    Json,
+};
 use serde::{Deserialize, Serialize};
 use serde_rusqlite::from_rows;
 
@@ -86,7 +89,7 @@ fn query_summary(
 
     // Grand totals: simple sum with no rollup so each transaction is counted once.
     let totals_sql = format!(
-        "SELECT COALESCE(SUM(t.debit),0), COALESCE(SUM(t.credit),0) \
+        "SELECT COALESCE(SUM(t.debit),0) / 100.0, COALESCE(SUM(t.credit),0) / 100.0 \
          FROM transactions t \
          JOIN accounts a ON t.account_id = a.id \
          WHERE 1=1{filter_clause}"
@@ -109,9 +112,9 @@ fn query_summary(
         "SELECT sub.cat_id AS category_id, \
                 COALESCE(c.name, 'Uncategorized') AS category, \
                 c.parent_id, p.name AS parent, \
-                SUM(sub.d)                    AS debit, \
-                SUM(sub.cr)                   AS credit, \
-                SUM(sub.cr) - SUM(sub.d)      AS net, \
+                SUM(sub.d)  / 100.0           AS debit, \
+                SUM(sub.cr) / 100.0           AS credit, \
+                (SUM(sub.cr) - SUM(sub.d)) / 100.0 AS net, \
                 SUM(sub.cnt)                  AS count \
          FROM ( \
            SELECT t.category_id AS cat_id, \
@@ -191,7 +194,7 @@ fn query_transactions(
     let sql = format!(
         "SELECT \
            t.id, t.date, t.code, t.description, t.ref1, t.ref2, t.ref3, t.status, \
-           t.debit, t.credit, \
+           t.debit / 100.0 AS debit, t.credit / 100.0 AS credit, \
            c.name AS category, t.category_id, \
            a.name AS account, t.account_id \
          FROM transactions t \

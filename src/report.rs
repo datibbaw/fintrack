@@ -43,9 +43,9 @@ pub fn summary(
     let sql = format!(
         "SELECT \
            COALESCE(c.name, 'Uncategorized') AS category, \
-           SUM(COALESCE(t.debit,  0)) AS total_debit, \
-           SUM(COALESCE(t.credit, 0)) AS total_credit, \
-           SUM(COALESCE(t.credit, 0)) - SUM(COALESCE(t.debit, 0)) AS net, \
+           SUM(COALESCE(t.debit,  0)) / 100.0 AS total_debit, \
+           SUM(COALESCE(t.credit, 0)) / 100.0 AS total_credit, \
+           (SUM(COALESCE(t.credit, 0)) - SUM(COALESCE(t.debit, 0))) / 100.0 AS net, \
            COUNT(*) AS tx_count \
          FROM transactions t \
          LEFT JOIN categories c ON t.category_id = c.id \
@@ -138,7 +138,7 @@ pub fn transactions(
     let sql = format!(
         "SELECT t.date, t.code, t.description, t.ref2, \
                 COALESCE(c.name, 'Uncategorized') AS category, \
-                t.debit, t.credit, a.name AS account \
+                t.debit / 100.0 AS debit, t.credit / 100.0 AS credit, a.name AS account \
          FROM transactions t \
          LEFT JOIN categories c ON t.category_id = c.id \
          JOIN  accounts a ON t.account_id = a.id \

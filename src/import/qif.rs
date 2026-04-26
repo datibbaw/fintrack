@@ -30,7 +30,7 @@ fn into_builder(tx: QifTransaction) -> TransactionBuilder {
         .unwrap();
 
     builder
-        .amount(tx.amount)
+        .amount((tx.amount * 100.0).round() as i64)
         .date(date)
         .code(tx.number_of_the_check.to_string())
         .description(description)
@@ -59,7 +59,7 @@ mod tests {
         let tx = parsed.remove(0).account_id(1).build().unwrap();
         assert_eq!(tx.date.to_string(), "2026-04-02");
         assert_eq!(tx.description, "SASCO SENIOR CITIZENS SINGAPORE SG");
-        assert_eq!(tx.debit, Some(39.00));
+        assert_eq!(tx.debit, Some(3900));
         assert_eq!(tx.credit, None);
         assert_eq!(tx.status, "*");
     }
@@ -72,7 +72,7 @@ mod tests {
         assert_eq!(tx.date.to_string(), "2026-03-26");
         assert_eq!(tx.description, "INBOUND FT PYMT");
         assert_eq!(tx.debit, None);
-        assert_eq!(tx.credit, Some(39.00));
+        assert_eq!(tx.credit, Some(3900));
     }
 
     #[test]
@@ -89,6 +89,6 @@ mod tests {
         let mut parsed = parse(FIXTURE_PATH).unwrap();
         // Fourth row: T-1,234.56
         let tx = parsed.remove(3).account_id(1).build().unwrap();
-        assert_eq!(tx.debit, Some(1234.56));
+        assert_eq!(tx.debit, Some(123456));
     }
 }

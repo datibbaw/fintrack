@@ -73,7 +73,10 @@ pub async fn serve(conn: Connection, port: u16, open: bool) -> anyhow::Result<()
 
     let api = Router::new()
         .route("/accounts", get(accounts::index))
-        .route("/categories", get(categories::index).post(categories::create))
+        .route(
+            "/categories",
+            get(categories::index).post(categories::create),
+        )
         .route(
             "/categories/:id",
             put(categories::update).delete(categories::destroy),
