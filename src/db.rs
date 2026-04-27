@@ -109,6 +109,33 @@ pub fn find_account(conn: &Connection, number: &str) -> Result<Option<Account>> 
     })
 }
 
+pub fn find_account_by_id(conn: &Connection, id: i64) -> Result<Option<Account>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, name, number, bank, currency \
+         FROM accounts WHERE id = ?1 LIMIT 1",
+    )?;
+    let mut rows = stmt.query(params![id])?;
+    Ok(match rows.next()? {
+        Some(row) => Some(from_row::<Account>(row)?),
+        None => None,
+    })
+}
+
+pub fn update_account(
+    conn: &Connection,
+    id: i64,
+    name: &str,
+    number: &str,
+    bank: &str,
+    currency: &str,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE accounts SET name = ?1, number = ?2, bank = ?3, currency = ?4 WHERE id = ?5",
+        params![name, number, bank, currency, id],
+    )?;
+    Ok(())
+}
+
 pub fn remove_account(conn: &Connection, id: i64) -> Result<()> {
     conn.execute(
         "DELETE FROM transactions WHERE account_id = ?1",
