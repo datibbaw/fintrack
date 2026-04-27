@@ -25,17 +25,37 @@ type Db = Arc<Mutex<rusqlite::Connection>>;
 
 // ── Error type ────────────────────────────────────────────────────────────────
 
-struct ApiError(anyhow::Error);
+struct ApiError {
+    status: StatusCode,
+    message: String,
+}
+
+impl ApiError {
+    fn unprocessable(msg: impl Into<String>) -> Self {
+        ApiError { status: StatusCode::UNPROCESSABLE_ENTITY, message: msg.into() }
+    }
+
+    fn not_found(msg: impl Into<String>) -> Self {
+        ApiError { status: StatusCode::NOT_FOUND, message: msg.into() }
+    }
+
+    fn internal(e: impl Into<anyhow::Error>) -> Self {
+        ApiError { status: StatusCode::INTERNAL_SERVER_ERROR, message: e.into().to_string() }
+    }
+}
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        (StatusCode::INTERNAL_SERVER_ERROR, self.0.to_string()).into_response()
+        (self.status, self.message).into_response()
     }
 }
 
 impl<E: Into<anyhow::Error>> From<E> for ApiError {
     fn from(e: E) -> Self {
-        ApiError(e.into())
+        ApiError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            message: e.into().to_string(),
+        }
     }
 }
 
@@ -72,7 +92,15 @@ pub async fn serve(conn: Connection, port: u16, open: bool) -> anyhow::Result<()
     let state: Db = Arc::new(Mutex::new(conn));
 
     let api = Router::new()
-        .route("/accounts", get(accounts::index))
+        .route(
+            "/accounts",
+            get(accounts::index).post(accounts::create),
+        )
+        .route(
+            "/accounts/:id",
+            put(accounts::update).delete(accounts::destroy),
+        )
+        .route("/currencies", get(accounts::currencies))
         .route(
             "/categories",
             get(categories::index).post(categories::create),

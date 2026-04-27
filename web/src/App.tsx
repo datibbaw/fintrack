@@ -1,17 +1,17 @@
 import { useSignal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import { api } from './api'
-import type { Account, Category } from './types'
-import { activeTab, filterAccount } from './store'
+import type { Category } from './types'
+import { activeTab, filterAccount, accounts } from './store'
 import { FilterBar } from './components/FilterBar'
 import { Summary } from './components/Summary'
 import { Transactions } from './components/Transactions'
 import { Categories } from './components/Categories'
+import { Accounts } from './components/Accounts'
 
 // ── App ───────────────────────────────────────────────────────────────────────
 
 export function App() {
-  const accounts = useSignal<Account[]>([])
   const categories = useSignal<Category[]>([])
 
   useEffect(() => {
@@ -54,17 +54,25 @@ export function App() {
           >
             Categories
           </button>
+          <button
+            class={`tab-btn ${activeTab.value === 'accounts' ? 'active' : ''}`}
+            onClick={() => { activeTab.value = 'accounts' }}
+          >
+            Accounts
+          </button>
         </nav>
       </header>
 
-      {activeTab.value !== 'categories' && <FilterBar accounts={accounts.value} />}
+      {activeTab.value !== 'categories' && activeTab.value !== 'accounts' && <FilterBar accounts={accounts.value} />}
 
       <main class="main">
         {activeTab.value === 'summary'
           ? <Summary categories={categories.value} />
           : activeTab.value === 'transactions'
           ? <Transactions categories={categories.value} />
-          : <Categories />
+          : activeTab.value === 'categories'
+          ? <Categories />
+          : <Accounts />
         }
       </main>
     </div>
