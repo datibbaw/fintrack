@@ -1,8 +1,8 @@
 import { useSignal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import { api } from './api'
-import type { Account, Category } from './types'
-import { activeTab, filterAccount } from './store'
+import type { Category } from './types'
+import { activeTab, filterAccount, accounts } from './store'
 import { FilterBar } from './components/FilterBar'
 import { Summary } from './components/Summary'
 import { Transactions } from './components/Transactions'
@@ -12,7 +12,6 @@ import { Accounts } from './components/Accounts'
 // ── App ───────────────────────────────────────────────────────────────────────
 
 export function App() {
-  const accounts = useSignal<Account[]>([])
   const categories = useSignal<Category[]>([])
 
   useEffect(() => {
