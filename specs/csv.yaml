@@ -26,11 +26,11 @@ currency:
 
 row_formats:
   - name: 'DBS Account Legacy'
-    date_format: '%d %b %Y'
     columns:
       - column: A
         expression: '^Transaction Date$'
         field: date
+        date_format: '%d %b %Y'
       - column: B
         expression: '^Transaction Code$'
         field: code
@@ -57,11 +57,11 @@ row_formats:
         field: credit
 
   - name: 'DBS Account'
-    date_format: '%d %b %Y'
     columns:
       - column: A
         expression: '^Transaction Date$'
         field: date
+        date_format: '%d %b %Y'
       - column: C
         expression: '^Statement Code$'
         field: code
@@ -88,11 +88,11 @@ row_formats:
         field: credit
 
   - name: 'DBS Card'
-    date_format: '%d %b %Y'
     columns:
       - column: A
         expression: '^Transaction Date$'
         field: date
+        date_format: '%d %b %Y'
       - column: C
         expression: '^Transaction Description$'
         field: description
@@ -113,18 +113,18 @@ row_formats:
         field: credit
 
   - name: 'Amex'
-    date_format: '%m/%d/%Y'
-    invert_amount_sign: true # Amex exports payments as negative
     columns:
       - column: A
         expression: '^Date$'
         field: date
+        date_format: '%m/%d/%Y'
       - column: B
         expression: '^Description$'
         field: description
       - column: C
         expression: '^Amount$'
         field: amount
+        invert: true # Amex exports payments as negative
       - column: D
         expression: '^Extended Details$'
         field: ref1

@@ -247,7 +247,7 @@ fn main() -> Result<()> {
                     .ok_or_else(|| anyhow!("Account not found: '{account}'"))?;
                 import::import_qif(&conn, &file, &account)?
             } else {
-                import::import_csv(&conn, &file, account, None)?
+                import::import_csv(&conn, &file, account)?
             };
             println!(
                 "Account : {} ({})\nImported: {}  |  Skipped (duplicates): {}",

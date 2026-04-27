@@ -1,13 +1,15 @@
 use crate::{
     db::find_account,
-    models::{Account, Transaction},
+    models::{Account, Transaction, TransactionBuilder},
 };
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
+use chrono::NaiveDate;
 use rusqlite::Connection;
+use rusty_money::{Money, iso};
 
 mod csv;
 mod qif;
-mod specs;
+pub mod specs;
 
 #[derive(Debug)]
 pub struct ImportResult {
@@ -21,11 +23,10 @@ pub fn import_csv<P: AsRef<std::path::Path>>(
     conn: &Connection,
     path: P,
     account_number: Option<String>,
-    currency: Option<String>,
 ) -> Result<ImportResult> {
-    let (metadata, rows) = csv::parse(path)?;
+    let data = csv::parse(path)?;
 
-    let account = match (account_number, metadata.account_number) {
+    let account = match (account_number, data.account_number) {
         (Some(num), Some(file_num)) if num != file_num => {
             anyhow::bail!(
                 "account number mismatch: file has '{}', argument is '{}'",
@@ -45,16 +46,8 @@ pub fn import_csv<P: AsRef<std::path::Path>>(
         }
     };
 
-    if let Some(file_currency) = metadata.currency {
-        if let Some(arg_currency) = currency {
-            if file_currency != arg_currency {
-                anyhow::bail!(
-                    "currency mismatch: file has '{}', argument is '{}'",
-                    file_currency,
-                    arg_currency
-                );
-            }
-        } else if account.currency != file_currency {
+    if let Some(file_currency) = data.currency {
+        if account.currency != file_currency {
             anyhow::bail!(
                 "currency mismatch: file has '{}', but account '{}' has currency '{}'",
                 file_currency,
@@ -64,21 +57,17 @@ pub fn import_csv<P: AsRef<std::path::Path>>(
         }
     }
 
-    let mut importer = Importer::new(conn, account);
-    for result in rows {
-        let mut builder = match result {
-            Ok(b) => b,
-            Err(e) => {
-                eprintln!("Warning: failed to parse CSV row, error: {:?}", e);
-                continue;
-            }
-        };
-        match builder.account_id(importer.account.id).build() {
-            Ok(t) => importer.insert(t)?,
-            Err(e) => eprintln!(
-                "Warning: failed to build transaction from CSV row, error: {:?}",
-                e
-            ),
+    let currency = iso::find(&account.currency)
+        .ok_or_else(|| anyhow!("unknown currency: '{}'", account.currency))?;
+
+    let mut importer = Importer::new(conn, account.clone());
+    for row in data.rows {
+        match row_into_builder(row, currency) {
+            Ok(mut builder) => match builder.account_id(account.id).build() {
+                Ok(t) => importer.insert(t)?,
+                Err(e) => eprintln!("Warning: failed to build transaction from CSV row: {:?}", e),
+            },
+            Err(e) => eprintln!("Warning: failed to parse CSV row: {:?}", e),
         }
     }
     Ok(importer.finish())
@@ -100,6 +89,47 @@ pub fn import_qif<P: AsRef<std::path::Path>>(
         }
     }
     Ok(importer.finish())
+}
+
+fn row_into_builder(row: csv::Row, currency: &iso::Currency) -> Result<TransactionBuilder> {
+    let mut builder = TransactionBuilder::default();
+    for (field, value) in row {
+        match field {
+            csv::Field::Date { date_format } => {
+                builder.date(
+                    NaiveDate::parse_from_str(&value, &date_format)
+                        .with_context(|| format!("failed to parse date: '{}'", value))?,
+                );
+            }
+            csv::Field::Debit => {
+                builder.debit(parse_amount(&value, currency)?);
+            }
+            csv::Field::Credit => {
+                builder.credit(parse_amount(&value, currency)?);
+            }
+            csv::Field::Amount { invert } => {
+                if let Some(n) = parse_amount(&value, currency)? {
+                    builder.amount(if invert.unwrap_or(false) { -n } else { n });
+                }
+            }
+            csv::Field::Code => { builder.code(value); }
+            csv::Field::Description => { builder.description(value); }
+            csv::Field::Ref1 => { builder.ref1(value); }
+            csv::Field::Ref2 => { builder.ref2(value); }
+            csv::Field::Ref3 => { builder.ref3(value); }
+            csv::Field::Status => { builder.status(value); }
+        }
+    }
+    Ok(builder)
+}
+
+fn parse_amount(s: &str, currency: &iso::Currency) -> Result<Option<i64>> {
+    if s.trim().is_empty() {
+        return Ok(None);
+    }
+    Money::from_str(s.trim(), currency)
+        .map(|m| Some(m.to_minor_units()))
+        .map_err(|e| anyhow!("failed to parse amount '{}': {:?}", s, e))
 }
 
 struct Importer<'a> {
@@ -158,7 +188,7 @@ mod tests {
     }
 
     fn csv(conn: &Connection, path: &str, number: &str) -> Result<ImportResult> {
-        import_csv(conn, path, Some(number.to_string()), None)
+        import_csv(conn, path, Some(number.to_string()))
     }
 
     // ── 9-column savings/current ──────────────────────────────────────────────
@@ -393,7 +423,7 @@ mod tests {
         let (_dir, conn) = tmp_conn();
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/dbs_9col.csv");
         // file has account number 000-11111-1; pass a different number
-        let err = import_csv(&conn, path, Some("wrong-number".to_string()), None).unwrap_err();
+        let err = import_csv(&conn, path, Some("wrong-number".to_string())).unwrap_err();
         assert!(err.to_string().contains("account number mismatch"), "{err}");
     }
 
@@ -403,7 +433,7 @@ mod tests {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/dbs_9col.csv");
         // file has currency SGD; account has USD
         create_account_with_currency(&conn, "000-11111-1", "Test", "USD").unwrap();
-        let err = import_csv(&conn, path, Some("000-11111-1".to_string()), None).unwrap_err();
+        let err = import_csv(&conn, path, Some("000-11111-1".to_string())).unwrap_err();
         assert!(err.to_string().contains("currency mismatch"), "{err}");
     }
 

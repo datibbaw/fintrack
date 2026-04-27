@@ -32,6 +32,7 @@ serde_rusqlite = "0.35"
 qif_parser = "0.4"
 tabled = "0.20.0"
 derive_builder = "0.20.2"
+rusty-money    = { version = "0.5", features = ["iso"] }
 
 [dev-dependencies]
 tempfile = "3"

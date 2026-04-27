@@ -10,6 +10,7 @@ pub struct Transaction {
     #[builder(default)]
     pub code: String,
     pub description: String,
+    #[builder(default)]
     pub ref1: String,
     #[builder(default)]
     pub ref2: String,
