@@ -68,8 +68,8 @@ fintrack account add "DBS Savings" --number 123-456789-0 --bank DBS --currency S
 fintrack account add "Amex Platinum" --number 3782-822463-10005 --bank Amex --currency SGD
 
 # 2. Import a CSV export (format auto-detected from column headers)
-fintrack import ~/Downloads/statement.csv                          # DBS: account number read from file
-fintrack import --account "Amex Platinum" ~/Downloads/activity.csv # Amex: no account number in file
+fintrack import ~/Downloads/statement.csv                            # DBS: account number read from file
+fintrack import --account 3782-822463-10005 ~/Downloads/activity.csv # Amex: no account number in file
 
 # 3. Add some spending categories
 fintrack category add Food
@@ -114,7 +114,7 @@ Export your statement from DBS iBanking as a CSV. The layout is detected automat
 ```bash
 fintrack import ~/Downloads/statement.csv
 # or, to override / disambiguate:
-fintrack import --account "DBS Savings" ~/Downloads/statement.csv
+fintrack import --account 123-456789-0 ~/Downloads/statement.csv
 ```
 
 Re-importing the same file is safe; duplicate rows are silently skipped.
@@ -124,7 +124,7 @@ Re-importing the same file is safe; duplicate rows are silently skipped.
 Download your activity CSV from the Amex website (Activity > Download). Amex files do not include an account number, so `--account` is required:
 
 ```bash
-fintrack import --account "Amex Platinum" ~/Downloads/activity.csv
+fintrack import --account 3782-822463-10005 ~/Downloads/activity.csv
 ```
 
 Amex uses a single signed `Amount` column — positive values are stored as debits (charges), negative values as credits (payments and cashback).
@@ -132,7 +132,7 @@ Amex uses a single signed `Amount` column — positive values are stored as debi
 ### QIF files
 
 ```bash
-fintrack import --account "My Card" ~/Downloads/export.qif
+fintrack import --account 541 ~/Downloads/export.qif
 ```
 
 ### Adding a new bank
@@ -303,7 +303,7 @@ All under `/api`:
 | GET | `/api/summary` | `from`, `to`, `account` |
 | GET | `/api/transactions` | `from`, `to`, `category`, `account`, `uncategorized`, `limit`, `offset` |
 
-Date params use `YYYY-MM-DD` format. `account` matches by name or number.
+Date params use `YYYY-MM-DD` format. `account` matches by name or account number.
 
 ### Key architectural decisions
 

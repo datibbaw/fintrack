@@ -41,7 +41,7 @@ enum Commands {
     /// Import transactions from a CSV or QIF file
     Import {
         file: String,
-        /// Account number or name; required
+        /// Account number; required for QIF and formats without embedded account number (e.g. Amex)
         #[arg(long)]
         account: Option<String>,
     },

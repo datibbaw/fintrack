@@ -100,7 +100,7 @@ All under `/api`:
 | GET | `/api/summary` | `from`, `to`, `account` |
 | GET | `/api/transactions` | `from`, `to`, `category`, `account`, `uncategorized`, `limit`, `offset` |
 
-Date params: `YYYY-MM-DD`. `account` matches by name or number. `limit` defaults to 100 for summary, 50 for transactions.
+Date params: `YYYY-MM-DD`. `account` matches by name or account number. `limit` defaults to 100 for summary, 50 for transactions.
 
 ## Development workflow
 
