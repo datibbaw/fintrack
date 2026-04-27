@@ -13,7 +13,7 @@ export const filterFrom    = signal(startOfMonth())
 export const filterTo      = signal(today())
 export const filterAccount = signal(localStorage.getItem('fintrack.account') ?? '')
 
-export type Tab = 'summary' | 'transactions' | 'categories'
+export type Tab = 'summary' | 'transactions' | 'categories' | 'accounts'
 export const activeTab      = signal<Tab>('summary')
 export const categoryFilter = signal('')
 export const uncategorized  = signal(false)
