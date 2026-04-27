@@ -5,7 +5,7 @@ use crate::{
 use anyhow::{anyhow, Context, Result};
 use chrono::NaiveDate;
 use rusqlite::Connection;
-use rusty_money::{Money, iso};
+use rusty_money::{iso, Money};
 
 mod csv;
 mod qif;
@@ -112,12 +112,24 @@ fn row_into_builder(row: csv::Row, currency: &iso::Currency) -> Result<Transacti
                     builder.amount(if invert.unwrap_or(false) { -n } else { n });
                 }
             }
-            csv::Field::Code => { builder.code(value); }
-            csv::Field::Description => { builder.description(value); }
-            csv::Field::Ref1 => { builder.ref1(value); }
-            csv::Field::Ref2 => { builder.ref2(value); }
-            csv::Field::Ref3 => { builder.ref3(value); }
-            csv::Field::Status => { builder.status(value); }
+            csv::Field::Code => {
+                builder.code(value);
+            }
+            csv::Field::Description => {
+                builder.description(value);
+            }
+            csv::Field::Ref1 => {
+                builder.ref1(value);
+            }
+            csv::Field::Ref2 => {
+                builder.ref2(value);
+            }
+            csv::Field::Ref3 => {
+                builder.ref3(value);
+            }
+            csv::Field::Status => {
+                builder.status(value);
+            }
         }
     }
     Ok(builder)
