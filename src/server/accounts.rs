@@ -102,35 +102,25 @@ pub async fn update(
 ) -> Result<StatusCode, ApiError> {
     validate_currency(&body.currency)?;
 
-    // Check currency-lock constraint: fetch current currency + tx count in one query.
-    let db_check = Arc::clone(&db);
-    let new_currency = body.currency.clone();
-    let (current_currency, tx_count) = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
-        let conn = db_check.lock().map_err(|_| anyhow!("db lock poisoned"))?;
-        let acc = db::find_account_by_id(&conn, id)?
-            .ok_or_else(|| anyhow!("account {} not found", id))?;
-        let count = if acc.currency != new_currency {
-            db::count_transactions_for_account(&conn, id)?
-        } else {
-            0
-        };
-        Ok((acc.currency, count))
-    })
-    .await
-    .map_err(|e| anyhow!("thread error: {e}"))??;
-
-    if current_currency != body.currency && tx_count > 0 {
-        return Err(ApiError::unprocessable(
-            "currency cannot be changed while the account has transactions",
-        ));
-    }
-
-    tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
-        let conn = db.lock().map_err(|_| anyhow!("db lock poisoned"))?;
+    tokio::task::spawn_blocking(move || -> Result<(), ApiError> {
+        let conn = db.lock().map_err(|_| ApiError::internal(anyhow!("db lock poisoned")))?;
+        let acc = db::find_account_by_id(&conn, id)
+            .map_err(ApiError::internal)?
+            .ok_or_else(|| ApiError::not_found(format!("account {id} not found")))?;
+        if acc.currency != body.currency {
+            let count = db::count_transactions_for_account(&conn, id)
+                .map_err(ApiError::internal)?;
+            if count > 0 {
+                return Err(ApiError::unprocessable(
+                    "currency cannot be changed while the account has transactions",
+                ));
+            }
+        }
         db::update_account(&conn, id, &body.name, &body.number, &body.bank, &body.currency)
+            .map_err(ApiError::internal)
     })
     .await
-    .map_err(|e| anyhow!("thread error: {e}"))??;
+    .map_err(|e| ApiError::internal(anyhow!("thread error: {e}")))??;
 
     Ok(StatusCode::NO_CONTENT)
 }

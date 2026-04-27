@@ -1,4 +1,5 @@
 import { signal } from '@preact/signals'
+import type { Account } from './types'
 
 function startOfMonth(): string {
   const d = new Date()
@@ -8,6 +9,8 @@ function startOfMonth(): string {
 function today(): string {
   return new Date().toISOString().slice(0, 10)
 }
+
+export const accounts      = signal<Account[]>([])
 
 export const filterFrom    = signal(startOfMonth())
 export const filterTo      = signal(today())

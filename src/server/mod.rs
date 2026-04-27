@@ -34,6 +34,14 @@ impl ApiError {
     fn unprocessable(msg: impl Into<String>) -> Self {
         ApiError { status: StatusCode::UNPROCESSABLE_ENTITY, message: msg.into() }
     }
+
+    fn not_found(msg: impl Into<String>) -> Self {
+        ApiError { status: StatusCode::NOT_FOUND, message: msg.into() }
+    }
+
+    fn internal(e: impl Into<anyhow::Error>) -> Self {
+        ApiError { status: StatusCode::INTERNAL_SERVER_ERROR, message: e.into().to_string() }
+    }
 }
 
 impl IntoResponse for ApiError {

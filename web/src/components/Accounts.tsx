@@ -2,12 +2,11 @@ import { signal, effect } from '@preact/signals'
 import { useSignal } from '@preact/signals'
 import { useRef, useEffect } from 'preact/hooks'
 import { api } from '../api'
-import { activeTab } from '../store'
+import { activeTab, accounts } from '../store'
 import type { Account } from '../types'
 
 // ── Module-level data ─────────────────────────────────────────────────────────
 
-const accounts    = signal<Account[]>([])
 const currencies  = signal<string[]>([])
 const loading     = signal(false)
 const fetchError  = signal<string | null>(null)
@@ -21,7 +20,7 @@ effect(() => {
   fetchError.value = null
   Promise.all([api.accounts(), api.currencies()])
     .then(([accs, curs]) => {
-      accounts.value   = accs
+      accounts.value   = accs   // writes to shared store signal
       currencies.value = curs
     })
     .catch(e => { fetchError.value = String(e) })
@@ -86,13 +85,21 @@ function AccountForm({ mode, currencies: currencyList, onSave, onCancel }: FormP
   async function submit(e: Event) {
     e.preventDefault()
     if (saving.value) return
+    const trimmedName     = name.value.trim()
+    const trimmedNumber   = number.value.trim()
+    const trimmedBank     = bank.value.trim()
+    const trimmedCurrency = currency.value.trim().toUpperCase()
+    if (!trimmedName || !trimmedNumber) {
+      error.value = 'Name and account number are required.'
+      return
+    }
     saving.value = true
     error.value  = null
     const data = {
-      name:     name.value.trim(),
-      number:   number.value.trim(),
-      bank:     bank.value.trim(),
-      currency: currency.value.trim().toUpperCase(),
+      name:     trimmedName,
+      number:   trimmedNumber,
+      bank:     trimmedBank,
+      currency: trimmedCurrency,
     }
     try {
       if (mode.type === 'edit') {
