@@ -68,8 +68,8 @@ fintrack account add "DBS Savings" --number 123-456789-0 --bank DBS --currency S
 fintrack account add "Amex Platinum" --number 3782-822463-10005 --bank Amex --currency SGD
 
 # 2. Import a CSV export (format auto-detected from column headers)
-fintrack import --account "DBS Savings" ~/Downloads/statement.csv
-fintrack import --account "Amex Platinum" ~/Downloads/activity.csv
+fintrack import ~/Downloads/statement.csv                          # DBS: account number read from file
+fintrack import --account "Amex Platinum" ~/Downloads/activity.csv # Amex: no account number in file
 
 # 3. Add some spending categories
 fintrack category add Food
@@ -109,9 +109,11 @@ fintrack account add "DBS Savings" --number 123-456789-0 --bank DBS --currency S
 
 ### DBS / POSB
 
-Export your statement from DBS iBanking as a CSV. The layout is detected automatically.
+Export your statement from DBS iBanking as a CSV. The layout is detected automatically. The account number is read from the file header, so `--account` is optional if the account is already registered:
 
 ```bash
+fintrack import ~/Downloads/statement.csv
+# or, to override / disambiguate:
 fintrack import --account "DBS Savings" ~/Downloads/statement.csv
 ```
 
@@ -119,7 +121,7 @@ Re-importing the same file is safe; duplicate rows are silently skipped.
 
 ### American Express
 
-Download your activity CSV from the Amex website (Activity > Download).
+Download your activity CSV from the Amex website (Activity > Download). Amex files do not include an account number, so `--account` is required:
 
 ```bash
 fintrack import --account "Amex Platinum" ~/Downloads/activity.csv
