@@ -2,7 +2,7 @@ use std::{collections::HashMap, path::Path};
 
 use crate::import::specs;
 use anyhow::{anyhow, Result};
-use csv::{Reader, StringRecord};
+use csv::StringRecord;
 use regex::Regex;
 use serde::Deserialize;
 
@@ -22,9 +22,30 @@ pub(super) struct Data {
     pub(super) rows: Vec<Row>,
 }
 
+pub(super) type Row = Vec<(Field, String)>;
+
+#[derive(Clone, PartialEq, Eq, Hash, Deserialize)]
+#[serde(tag = "field", rename_all = "lowercase")]
+pub(super) enum Field {
+    Date { date_format: String },
+    Code,
+    Description,
+    Ref1,
+    Ref2,
+    Ref3,
+    Status,
+    Debit,
+    Credit,
+    Amount { invert: Option<bool> },
+}
+
 pub(super) fn parse<P: AsRef<Path>>(path: P) -> Result<Data> {
     let spec: Spec = specs::load(CSV_SPEC)?;
-    spec.parse(path)
+    let reader = csv::ReaderBuilder::new()
+        .has_headers(false)
+        .flexible(true)
+        .from_path(path)?;
+    spec.parse(reader)
 }
 
 /// ValueSpec defines how to extract a single value (e.g. account number) from the CSV file.
@@ -42,11 +63,20 @@ struct CellMatch {
 }
 
 /// RowFormat defines how to detect and parse transaction rows in the CSV file.
-#[derive(Clone, Deserialize)]
+#[derive(Deserialize)]
 struct RowFormat {
     #[allow(dead_code)]
     name: String,
     columns: Vec<ColumnSpec>,
+}
+
+impl RowFormat {
+    fn fields_by_index(&self) -> HashMap<usize, &Field> {
+        self.columns
+            .iter()
+            .map(|col| (col.index(), &col.field))
+            .collect()
+    }
 }
 
 impl CellMatch {
@@ -77,13 +107,6 @@ enum SpecField<'a> {
     AccountNumber(String),
     RowFormat(&'a RowFormat),
     Currency(String),
-}
-
-fn reader_from_path<P: AsRef<Path>>(path: P) -> Result<Reader<std::fs::File>> {
-    Ok(csv::ReaderBuilder::new()
-        .has_headers(false)
-        .flexible(true)
-        .from_path(path)?)
 }
 
 impl Spec {
@@ -130,17 +153,16 @@ impl Spec {
         None
     }
 
-    fn parse<P: AsRef<Path>>(&self, path: P) -> Result<Data> {
-        let mut reader = reader_from_path(path)?;
+    fn parse<R: std::io::Read>(&self, mut reader: csv::Reader<R>) -> Result<Data> {
         let mut data = Data::default();
-        let mut row_format: Option<RowFormat> = None;
+        let mut row_format: Option<&RowFormat> = None;
 
         for (row_number, record) in reader.records().enumerate() {
             let record = record?;
 
             match self.parse_spec_field(&record, row_number) {
                 Some(SpecField::RowFormat(fmt)) => {
-                    row_format = Some(fmt.clone());
+                    row_format = Some(fmt);
                     break;
                 }
                 Some(SpecField::AccountNumber(n)) => data.account_number = Some(n),
@@ -149,19 +171,16 @@ impl Spec {
             }
         }
 
-        let row_format =
-            row_format.ok_or_else(|| anyhow!("no matching row format found in CSV"))?;
-
-        let fields: HashMap<usize, Field> = row_format.columns.into_iter()
-            .map(|col| (col.index(), col.field))
-            .collect();
+        let fields = row_format
+            .ok_or_else(|| anyhow!("no matching row format found in CSV"))?
+            .fields_by_index();
 
         for record in reader.records() {
             let row = record?
                 .into_iter()
                 .enumerate()
                 .filter_map(|(idx, cell)| {
-                    let field = fields.get(&idx)?;
+                    let field = *fields.get(&idx)?;
                     Some((field.clone(), cell.trim().to_string()))
                 })
                 .collect();
@@ -172,24 +191,7 @@ impl Spec {
     }
 }
 
-pub(super) type Row = Vec<(Field, String)>;
-
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Deserialize)]
-#[serde(tag = "field", rename_all = "lowercase")]
-pub(super) enum Field {
-    Date { date_format: String },
-    Code,
-    Description,
-    Ref1,
-    Ref2,
-    Ref3,
-    Status,
-    Debit,
-    Credit,
-    Amount { invert: Option<bool> },
-}
-
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Deserialize)]
 struct ColumnSpec {
     column: String,
     #[serde(with = "serde_regex")]
