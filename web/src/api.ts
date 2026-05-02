@@ -36,6 +36,22 @@ export const api = {
     return get('/api/accounts')
   },
 
+  currencies(): Promise<string[]> {
+    return get('/api/currencies')
+  },
+
+  createAccount(data: { name: string; number: string; bank: string; currency: string }): Promise<Account> {
+    return post('/api/accounts', data)
+  },
+
+  updateAccount(id: number, data: { name: string; number: string; bank: string; currency: string }): Promise<void> {
+    return send('PUT', `/api/accounts/${id}`, data)
+  },
+
+  deleteAccount(id: number): Promise<void> {
+    return send('DELETE', `/api/accounts/${id}`)
+  },
+
   categories(): Promise<Category[]> {
     return get('/api/categories')
   },

@@ -4,6 +4,7 @@ export interface Account {
   number: string
   bank: string
   currency: string
+  transaction_count: number
 }
 
 export interface Category {

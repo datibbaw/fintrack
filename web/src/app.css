@@ -515,7 +515,8 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 }
 
 .cat-row:hover .cat-icon-btns,
-.cat-row:focus-within .cat-icon-btns { opacity: 1; }
+.cat-row:focus-within .cat-icon-btns,
+.cat-icon-btns-always { opacity: 1; }
 
 .cat-icon-btn {
   border: none;
@@ -752,6 +753,88 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   .regex-hl .token.escape        { color: #1e8449; }
   .regex-hl .token.special-escape { color: #1e8449; }
   .regex-hl .token.backreference { color: #8e44ad; }
+}
+
+/* ── Account modal ─────────────────────────────────────────────────────────── */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, .45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.modal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) * 1.5);
+  box-shadow: 0 8px 32px rgba(0,0,0,.2);
+  padding: 1.5rem;
+  width: 100%;
+  max-width: 400px;
+}
+
+.modal-title {
+  font-size: 1rem;
+  font-weight: 700;
+  margin-bottom: 1.25rem;
+}
+
+.modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: .75rem;
+}
+
+.modal-label {
+  display: flex;
+  flex-direction: column;
+  gap: .3rem;
+  font-size: .8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--text-muted);
+}
+
+.modal-label .filter-input { width: 100%; }
+
+.required-mark {
+  color: var(--debit);
+  font-weight: 700;
+  font-size: .85em;
+}
+
+.modal-currency-locked {
+  display: flex;
+  flex-direction: column;
+  gap: .2rem;
+}
+
+.modal-lock-hint {
+  font-size: .72rem;
+  color: var(--text-muted);
+  font-style: italic;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.modal-error {
+  font-size: .82rem;
+  color: var(--debit);
+  background: var(--debit-light);
+  border-radius: var(--radius);
+  padding: .4rem .6rem;
+}
+
+.modal-btns {
+  display: flex;
+  gap: .5rem;
+  justify-content: flex-end;
+  margin-top: .25rem;
 }
 
 /* ── Responsive ────────────────────────────────────────────────────────────── */
