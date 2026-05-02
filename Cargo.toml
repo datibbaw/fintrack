@@ -33,6 +33,7 @@ qif_parser = "0.4"
 tabled = "0.20.0"
 derive_builder = "0.20.2"
 rusty-money    = { version = "0.5", features = ["iso"] }
+lopdf = "0.40.0"
 
 [dev-dependencies]
 tempfile = "3"

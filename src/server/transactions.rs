@@ -8,7 +8,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_rusqlite::from_rows;
 
-use crate::db;
+use crate::{db, models::Account};
 
 use super::{ApiError, Db};
 
@@ -60,7 +60,7 @@ pub struct SummaryResponse {
 pub struct SummaryParams {
     pub from: Option<String>,
     pub to: Option<String>,
-    pub account: Option<String>,
+    pub account: String,
 }
 
 #[derive(Deserialize, Default)]
@@ -68,7 +68,7 @@ pub struct TransactionsParams {
     pub from: Option<String>,
     pub to: Option<String>,
     pub category: Option<String>,
-    pub account: Option<String>,
+    pub account: String,
     pub uncategorized: Option<bool>,
     #[serde(default = "default_limit")]
     pub limit: i64,
@@ -80,16 +80,31 @@ fn default_limit() -> i64 {
     100
 }
 
+fn account_for_filter(
+    conn: &rusqlite::Connection,
+    account: &str,
+) -> anyhow::Result<Account> {
+    db::find_account(conn, account)?
+        .ok_or_else(|| anyhow!("account not found: {account}"))
+}
+
 fn query_summary(
     conn: &rusqlite::Connection,
     p: &SummaryParams,
 ) -> anyhow::Result<SummaryResponse> {
-    let (filter_clause, vals) =
-        db::build_filters(p.from.as_deref(), p.to.as_deref(), p.account.as_deref());
+    let account = account_for_filter(conn, &p.account)?;
+    let (mut filter_clause, mut vals) =
+        db::build_filters(p.from.as_deref(), p.to.as_deref());
+
+    filter_clause.push_str(" AND t.account_id = ?");
+    vals.push(account.id.to_string());
+
+    let factor = account.currency_factor();
 
     // Grand totals: simple sum with no rollup so each transaction is counted once.
     let totals_sql = format!(
-        "SELECT COALESCE(SUM(t.debit),0) / 100.0, COALESCE(SUM(t.credit),0) / 100.0 \
+        "SELECT COALESCE(SUM(t.debit),0) / CAST({factor} AS REAL), \
+                COALESCE(SUM(t.credit),0) / CAST({factor} AS REAL) \
          FROM transactions t \
          JOIN accounts a ON t.account_id = a.id \
          WHERE 1=1{filter_clause}"
@@ -112,9 +127,9 @@ fn query_summary(
         "SELECT sub.cat_id AS category_id, \
                 COALESCE(c.name, 'Uncategorized') AS category, \
                 c.parent_id, p.name AS parent, \
-                SUM(sub.d)  / 100.0           AS debit, \
-                SUM(sub.cr) / 100.0           AS credit, \
-                (SUM(sub.cr) - SUM(sub.d)) / 100.0 AS net, \
+                SUM(sub.d)  / CAST({factor} AS REAL) AS debit, \
+                SUM(sub.cr) / CAST({factor} AS REAL) AS credit, \
+                (SUM(sub.cr) - SUM(sub.d)) / CAST({factor} AS REAL) AS net, \
                 SUM(sub.cnt)                  AS count \
          FROM ( \
            SELECT t.category_id AS cat_id, \
@@ -161,8 +176,12 @@ fn query_transactions(
     conn: &rusqlite::Connection,
     p: &TransactionsParams,
 ) -> anyhow::Result<TransactionsResponse> {
+    let account = account_for_filter(conn, &p.account)?;
     let (mut filter_clause, mut vals) =
-        db::build_filters(p.from.as_deref(), p.to.as_deref(), p.account.as_deref());
+        db::build_filters(p.from.as_deref(), p.to.as_deref());
+
+    filter_clause.push_str(" AND t.account_id = ?");
+    vals.push(account.id.to_string());
 
     if p.uncategorized == Some(true) {
         filter_clause.push_str(" AND t.category_id IS NULL");
@@ -191,10 +210,12 @@ fn query_transactions(
     paginated_vals.push(p.limit.to_string());
     paginated_vals.push(p.offset.to_string());
 
+    let factor = account.currency_factor();
     let sql = format!(
         "SELECT \
            t.id, t.date, t.code, t.description, t.ref1, t.ref2, t.ref3, t.status, \
-           t.debit / 100.0 AS debit, t.credit / 100.0 AS credit, \
+           t.debit / CAST({factor} AS REAL) AS debit, \
+           t.credit / CAST({factor} AS REAL) AS credit, \
            c.name AS category, t.category_id, \
            a.name AS account, t.account_id \
          FROM transactions t \

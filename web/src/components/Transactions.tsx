@@ -1,6 +1,6 @@
 import { signal, effect, computed } from '@preact/signals'
 import type { Category, Transaction, TransactionsResponse } from '../types'
-import { filterFrom, filterTo, filterAccount, categoryFilter, uncategorized } from '../store'
+import { filterFrom, filterTo, filterAccount, categoryFilter, uncategorized, currencyFractionDigits } from '../store'
 import { api } from '../api'
 
 interface Props {
@@ -62,7 +62,8 @@ const visibleRows = computed(() => {
 })
 
 function fmt(n: number): string {
-  return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  const d = currencyFractionDigits.value
+  return n.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d })
 }
 
 export function Transactions({ categories }: Props) {

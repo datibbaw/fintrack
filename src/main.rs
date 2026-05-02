@@ -163,7 +163,7 @@ enum ReportCmd {
         to: Option<String>,
         /// Filter to one account (number or name)
         #[arg(long)]
-        account: Option<String>,
+        account: String,
     },
     /// List individual transactions
     Transactions {
@@ -176,7 +176,7 @@ enum ReportCmd {
         category: Option<String>,
         /// Filter to one account (number or name)
         #[arg(long)]
-        account: Option<String>,
+        account: String,
         /// Show only transactions that haven't been categorized yet
         #[arg(long)]
         uncategorized: bool,
@@ -237,17 +237,26 @@ fn main() -> Result<()> {
 
         // ── Import ────────────────────────────────────────────────────────────
         Commands::Import { file, account } => {
-            let result = if std::path::Path::new(&file)
+            let ext = std::path::Path::new(&file)
                 .extension()
-                .is_some_and(|e| e.eq_ignore_ascii_case("qif"))
-            {
-                let account =
-                    account.ok_or_else(|| anyhow!("Account must be specified for QIF import"))?;
-                let account = find_account(&conn, &account)?
-                    .ok_or_else(|| anyhow!("Account not found: '{account}'"))?;
-                import::import_qif(&conn, &file, &account)?
-            } else {
-                import::import_csv(&conn, &file, account)?
+                .and_then(|e| e.to_str())
+                .map(|e| e.to_ascii_lowercase());
+            let result = match ext.as_deref() {
+                Some("qif") => {
+                    let account = account
+                        .ok_or_else(|| anyhow!("Account must be specified for QIF import"))?;
+                    let account = find_account(&conn, &account)?
+                        .ok_or_else(|| anyhow!("Account not found: '{account}'"))?;
+                    import::import_qif(&conn, &file, &account)?
+                }
+                Some("pdf") => {
+                    let account = account
+                        .ok_or_else(|| anyhow!("Account must be specified for PDF import"))?;
+                    let account = find_account(&conn, &account)?
+                        .ok_or_else(|| anyhow!("Account not found: '{account}'"))?;
+                    import::import_pdf_youtrip(&conn, &file, &account)?
+                }
+                _ => import::import_csv(&conn, &file, account)?,
             };
             println!(
                 "Account : {} ({})\nImported: {}  |  Skipped (duplicates): {}",
@@ -371,7 +380,9 @@ fn main() -> Result<()> {
         // ── Reports ───────────────────────────────────────────────────────────
         Commands::Report(cmd) => match cmd {
             ReportCmd::Summary { from, to, account } => {
-                report::summary(&conn, from.as_deref(), to.as_deref(), account.as_deref())?;
+                let account = db::find_account(&conn, &account)?
+                    .ok_or_else(|| anyhow!("Account not found: '{account}'"))?;
+                report::summary(&conn, from.as_deref(), to.as_deref(), &account)?;
             }
             ReportCmd::Transactions {
                 from,
@@ -380,12 +391,14 @@ fn main() -> Result<()> {
                 account,
                 uncategorized,
             } => {
+                let account = db::find_account(&conn, &account)?
+                    .ok_or_else(|| anyhow!("Account not found: '{account}'"))?;
                 report::transactions(
                     &conn,
                     from.as_deref(),
                     to.as_deref(),
                     category.as_deref(),
-                    account.as_deref(),
+                    &account,
                     uncategorized,
                 )?;
             }
