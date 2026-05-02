@@ -4,7 +4,7 @@ use serde::Deserialize;
 use serde_rusqlite::from_rows;
 use tabled::{Table, Tabled};
 
-use crate::db;
+use crate::{db, models::Account};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -36,20 +36,24 @@ pub fn summary(
     conn: &Connection,
     from: Option<&str>,
     to: Option<&str>,
-    account: Option<&str>,
+    account: &Account,
 ) -> Result<()> {
-    let (filter_clause, vals) = db::build_filters(from, to, account);
+    let (mut filter_clause, mut vals) = db::build_filters(from, to);
+
+    filter_clause.push_str(" AND t.account_id = ?");
+    vals.push(account.id.to_string());
+
+    let factor = account.currency_factor() as f64;
 
     let sql = format!(
         "SELECT \
            COALESCE(c.name, 'Uncategorized') AS category, \
-           SUM(COALESCE(t.debit,  0)) / 100.0 AS total_debit, \
-           SUM(COALESCE(t.credit, 0)) / 100.0 AS total_credit, \
-           (SUM(COALESCE(t.credit, 0)) - SUM(COALESCE(t.debit, 0))) / 100.0 AS net, \
+           SUM(COALESCE(t.debit,  0)) / CAST({factor} AS REAL) AS total_debit, \
+           SUM(COALESCE(t.credit, 0)) / CAST({factor} AS REAL) AS total_credit, \
+           (SUM(COALESCE(t.credit, 0)) - SUM(COALESCE(t.debit, 0))) / CAST({factor} AS REAL) AS net, \
            COUNT(*) AS tx_count \
          FROM transactions t \
          LEFT JOIN categories c ON t.category_id = c.id \
-         JOIN  accounts a ON t.account_id = a.id \
          WHERE 1=1{filter_clause} \
          GROUP BY c.name \
          ORDER BY total_debit DESC"
@@ -123,10 +127,13 @@ pub fn transactions(
     from: Option<&str>,
     to: Option<&str>,
     category: Option<&str>,
-    account: Option<&str>,
+    account: &Account,
     uncategorized: bool,
 ) -> Result<()> {
-    let (mut filter_clause, mut vals) = db::build_filters(from, to, account);
+    let (mut filter_clause, mut vals) = db::build_filters(from, to);
+
+    filter_clause.push_str(" AND t.account_id = ?");
+    vals.push(account.id.to_string());
 
     if uncategorized {
         filter_clause.push_str(" AND t.category_id IS NULL");
@@ -135,10 +142,13 @@ pub fn transactions(
         vals.push(cat.to_string());
     }
 
+    let factor = account.currency_factor();
     let sql = format!(
         "SELECT t.date, t.code, t.description, t.ref2, \
                 COALESCE(c.name, 'Uncategorized') AS category, \
-                t.debit / 100.0 AS debit, t.credit / 100.0 AS credit, a.name AS account \
+                t.debit / CAST({factor} AS REAL) AS debit, \
+                t.credit / CAST({factor} AS REAL) AS credit, \
+                a.name AS account \
          FROM transactions t \
          LEFT JOIN categories c ON t.category_id = c.id \
          JOIN  accounts a ON t.account_id = a.id \

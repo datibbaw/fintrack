@@ -8,6 +8,8 @@ use rusqlite::Connection;
 use rusty_money::{Money, iso};
 
 mod csv;
+pub mod pdf_text;
+mod pdf_youtrip;
 mod qif;
 pub mod specs;
 
@@ -57,7 +59,7 @@ pub fn import_csv<P: AsRef<std::path::Path>>(
         }
     }
 
-    let currency = iso::find(&account.currency)
+    let currency = account.iso_currency()
         .ok_or_else(|| anyhow!("unknown currency: '{}'", account.currency))?;
 
     let mut importer = Importer::new(conn, account.clone());
@@ -68,6 +70,24 @@ pub fn import_csv<P: AsRef<std::path::Path>>(
                 Err(e) => eprintln!("Warning: failed to build transaction from CSV row: {:?}", e),
             },
             Err(e) => eprintln!("Warning: failed to parse CSV row: {:?}", e),
+        }
+    }
+    Ok(importer.finish())
+}
+
+pub fn import_pdf_youtrip<P: AsRef<std::path::Path>>(
+    conn: &Connection,
+    path: P,
+    account: &Account,
+) -> Result<ImportResult> {
+    let currency = account
+        .iso_currency()
+        .ok_or_else(|| anyhow!("unknown currency: '{}'", account.currency))?;
+    let mut importer = Importer::new(conn, account.clone());
+    for mut builder in pdf_youtrip::parse(path, currency)? {
+        match builder.account_id(account.id).build() {
+            Ok(t) => importer.insert(t)?,
+            Err(e) => eprintln!("Warning: failed to build transaction from PDF row: {:?}", e),
         }
     }
     Ok(importer.finish())

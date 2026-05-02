@@ -1,3 +1,5 @@
+use std::vec;
+
 use anyhow::Result;
 use rusqlite::{functions::FunctionFlags, params, Connection};
 use rusqlite_migration::{Migrations, M};
@@ -45,10 +47,9 @@ fn migrations() -> Migrations<'static> {
 pub fn build_filters(
     from: Option<&str>,
     to: Option<&str>,
-    account: Option<&str>,
 ) -> (String, Vec<String>) {
-    let mut clauses = Vec::new();
-    let mut vals: Vec<String> = Vec::new();
+    let mut clauses = vec![];
+    let mut vals: Vec<String> = vec![];
 
     if let Some(f) = from {
         clauses.push("t.date >= ?".to_string());
@@ -57,13 +58,6 @@ pub fn build_filters(
     if let Some(t) = to {
         clauses.push("t.date <= ?".to_string());
         vals.push(t.to_string());
-    }
-    if let Some(acc) = account {
-        if !acc.is_empty() {
-            clauses.push("(a.number = ? OR a.name = ?)".to_string());
-            vals.push(acc.to_string());
-            vals.push(acc.to_string());
-        }
     }
 
     let clause = if clauses.is_empty() {
