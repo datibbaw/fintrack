@@ -4,7 +4,11 @@ use serde::Deserialize;
 use serde_rusqlite::from_rows;
 use tabled::{Table, Tabled};
 
-use crate::{db, models::Account, money::{self, display_amount}};
+use crate::{
+    db,
+    models::Account,
+    money::{self, display_amount},
+};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -75,17 +79,22 @@ pub fn summary(
 
     println!("Period: {}\n", period_label(from, to));
 
-    let (total_debit, total_credit, total_txn) =
-        rows.iter().fold((0i64, 0i64, 0i64), |acc, r| {
-            (acc.0 + r.total_debit, acc.1 + r.total_credit, acc.2 + r.tx_count)
-        });
+    let (total_debit, total_credit, total_txn) = rows.iter().fold((0i64, 0i64, 0i64), |acc, r| {
+        (
+            acc.0 + r.total_debit,
+            acc.1 + r.total_credit,
+            acc.2 + r.tx_count,
+        )
+    });
 
     let mut table_builder = Table::builder(&rows);
     table_builder.push_record([
         "Total",
         &account.amount_from_minor(total_debit).to_string(),
         &account.amount_from_minor(total_credit).to_string(),
-        &account.amount_from_minor(total_credit - total_debit).to_string(),
+        &account
+            .amount_from_minor(total_credit - total_debit)
+            .to_string(),
         &total_txn.to_string(),
     ]);
 
@@ -115,7 +124,11 @@ struct TransactionRow {
 crate::impl_has_currency!(TransactionRow);
 
 fn short_description(desc: &str) -> &str {
-    if desc.len() > 42 { &desc[..42] } else { desc }
+    if desc.len() > 42 {
+        &desc[..42]
+    } else {
+        desc
+    }
 }
 
 pub fn transactions(

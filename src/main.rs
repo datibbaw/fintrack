@@ -9,9 +9,9 @@ mod categorize;
 mod db;
 mod import;
 mod models;
+mod money;
 mod report;
 mod server;
-mod money;
 
 #[cfg(test)]
 mod test_util;

@@ -13,8 +13,8 @@ pub(crate) fn create_account_with_currency(
     name: &str,
     currency: &str,
 ) -> Result<Account> {
-    let currency = iso::find(currency)
-        .ok_or_else(|| anyhow!("unknown currency: '{}'", currency))?;
+    let currency =
+        iso::find(currency).ok_or_else(|| anyhow!("unknown currency: '{}'", currency))?;
     db::add_account(conn, name, number, "DBS", currency).map(|id| Account {
         id,
         name: name.to_string(),

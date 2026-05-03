@@ -1,4 +1,4 @@
-use rusty_money::{Money, iso::Currency};
+use rusty_money::{iso::Currency, Money};
 use tabled::Tabled;
 
 use crate::money::{CurrencyCode, HasCurrency};
