@@ -88,8 +88,8 @@ fn tokenize_line(s: &str, currency: &'static iso::Currency) -> Vec<Token> {
 
     let mut iter = s.split_whitespace().rev();
     // Find longest suffix of amounts
-    while let Some(part) = iter.next() {
-        if let Ok((_, amount)) = parse_amount_str(part, currency) {
+    for part in &mut iter {
+        if let Ok(("", amount)) = parse_amount_str(part, currency) {
             result.push(Token::Amount(amount));
         } else {
             let mut prefix: Vec<&str> = vec![part];
