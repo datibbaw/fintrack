@@ -124,10 +124,9 @@ struct TransactionRow {
 crate::impl_has_currency!(TransactionRow);
 
 fn short_description(desc: &str) -> &str {
-    if desc.len() > 42 {
-        &desc[..42]
-    } else {
-        desc
+    match desc.char_indices().nth(42) {
+        Some((i, _)) => &desc[..i],
+        None => desc,
     }
 }
 
