@@ -43,10 +43,7 @@ fn migrations() -> Migrations<'static> {
 // ── Query helpers ─────────────────────────────────────────────────────────────
 
 /// Build a WHERE clause fragment and bind values for date filters.
-pub fn build_filters(
-    from: Option<&str>,
-    to: Option<&str>,
-) -> (String, Vec<String>) {
+pub fn build_filters(from: Option<&str>, to: Option<&str>) -> (String, Vec<String>) {
     let mut clauses = vec![];
     let mut vals: Vec<String> = vec![];
 

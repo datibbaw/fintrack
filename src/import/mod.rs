@@ -9,7 +9,6 @@ use rusqlite::Connection;
 use rusty_money::{iso, Money};
 
 mod csv;
-pub mod pdf_text;
 mod pdf_youtrip;
 mod qif;
 pub mod specs;

@@ -1,10 +1,14 @@
 use std::ops::Deref;
 
-use rusty_money::{Money, iso::{self, Currency}};
-use serde::{Deserialize, Deserializer, Serialize, de};
+use rusty_money::{
+    iso::{self, Currency},
+    Money,
+};
+use serde::{de, Deserialize, Deserializer, Serialize};
 
 pub fn display_amount<A: IntoMinorAmount, R: HasCurrency>(amount: &A, record: &R) -> String {
-    amount.to_minor()
+    amount
+        .to_minor()
         .map(|a| Money::from_minor(a, record.currency()).to_string())
         .unwrap_or_default()
 }

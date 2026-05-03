@@ -90,8 +90,14 @@ mod tests {
     fn apply_rules_categorizes_matching_transaction() {
         let conn = test_conn();
 
-        let account_id =
-            crate::db::add_account(&conn, "Test Bank", "ACC001", "TEST", iso::find("SGD").unwrap()).unwrap();
+        let account_id = crate::db::add_account(
+            &conn,
+            "Test Bank",
+            "ACC001",
+            "TEST",
+            iso::find("SGD").unwrap(),
+        )
+        .unwrap();
         let cat_id = crate::db::add_category(&conn, "Food", None).unwrap();
         crate::db::add_rule(&conn, cat_id, "description", "McDonald", 0).unwrap();
 
@@ -120,8 +126,14 @@ mod tests {
     fn apply_rules_skips_non_matching_transaction() {
         let conn = test_conn();
 
-        let account_id =
-            crate::db::add_account(&conn, "Test Bank", "ACC002", "TEST", iso::find("SGD").unwrap()).unwrap();
+        let account_id = crate::db::add_account(
+            &conn,
+            "Test Bank",
+            "ACC002",
+            "TEST",
+            iso::find("SGD").unwrap(),
+        )
+        .unwrap();
         let cat_id = crate::db::add_category(&conn, "Transport", None).unwrap();
         crate::db::add_rule(&conn, cat_id, "description", "Grab", 0).unwrap();
 

@@ -93,8 +93,7 @@ fn query_summary(
     p: &SummaryParams,
 ) -> anyhow::Result<SummaryResponse> {
     let account = account_for_filter(conn, &p.account)?;
-    let (mut filter_clause, mut vals) =
-        db::build_filters(p.from.as_deref(), p.to.as_deref());
+    let (mut filter_clause, mut vals) = db::build_filters(p.from.as_deref(), p.to.as_deref());
 
     filter_clause.push_str(" AND t.account_id = ?");
     vals.push(account.id.to_string());
@@ -177,8 +176,7 @@ fn query_transactions(
     p: &TransactionsParams,
 ) -> anyhow::Result<TransactionsResponse> {
     let account = account_for_filter(conn, &p.account)?;
-    let (mut filter_clause, mut vals) =
-        db::build_filters(p.from.as_deref(), p.to.as_deref());
+    let (mut filter_clause, mut vals) = db::build_filters(p.from.as_deref(), p.to.as_deref());
 
     filter_clause.push_str(" AND t.account_id = ?");
     vals.push(account.id.to_string());
