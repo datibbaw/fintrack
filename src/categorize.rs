@@ -80,6 +80,7 @@ pub fn apply_rules(conn: &Connection) -> Result<usize> {
 mod tests {
     use super::*;
     use rusqlite::params;
+    use rusty_money::iso;
 
     fn test_conn() -> Connection {
         crate::db::open(":memory:").expect("in-memory db")
@@ -90,7 +91,7 @@ mod tests {
         let conn = test_conn();
 
         let account_id =
-            crate::db::add_account(&conn, "Test Bank", "ACC001", "TEST", "SGD").unwrap();
+            crate::db::add_account(&conn, "Test Bank", "ACC001", "TEST", iso::find("SGD").unwrap()).unwrap();
         let cat_id = crate::db::add_category(&conn, "Food", None).unwrap();
         crate::db::add_rule(&conn, cat_id, "description", "McDonald", 0).unwrap();
 
@@ -120,7 +121,7 @@ mod tests {
         let conn = test_conn();
 
         let account_id =
-            crate::db::add_account(&conn, "Test Bank", "ACC002", "TEST", "SGD").unwrap();
+            crate::db::add_account(&conn, "Test Bank", "ACC002", "TEST", iso::find("SGD").unwrap()).unwrap();
         let cat_id = crate::db::add_category(&conn, "Transport", None).unwrap();
         crate::db::add_rule(&conn, cat_id, "description", "Grab", 0).unwrap();
 

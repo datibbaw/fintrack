@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Result};
 use clap::{Parser, Subcommand};
+use rusty_money::iso;
 use std::io::{self, BufRead, Write};
 
 use crate::db::find_account;
@@ -10,6 +11,7 @@ mod import;
 mod models;
 mod report;
 mod server;
+mod money;
 
 #[cfg(test)]
 mod test_util;
@@ -161,7 +163,7 @@ enum ReportCmd {
         /// End date (YYYY-MM-DD), inclusive
         #[arg(long)]
         to: Option<String>,
-        /// Filter to one account (number or name)
+        /// Account number
         #[arg(long)]
         account: String,
     },
@@ -174,7 +176,7 @@ enum ReportCmd {
         /// Filter to a specific category
         #[arg(long)]
         category: Option<String>,
-        /// Filter to one account (number or name)
+        /// Account number
         #[arg(long)]
         account: String,
         /// Show only transactions that haven't been categorized yet
@@ -208,7 +210,9 @@ fn main() -> Result<()> {
                 bank,
                 currency,
             } => {
-                let id = db::add_account(&conn, &name, &number, &bank, &currency)?;
+                let currency = iso::find(&currency)
+                    .ok_or_else(|| anyhow!("unknown currency: '{}'", currency))?;
+                let id = db::add_account(&conn, &name, &number, &bank, currency)?;
                 println!("Added account #{id}: {name} ({number})");
             }
             AccountCmd::Remove { account } => {

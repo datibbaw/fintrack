@@ -152,6 +152,80 @@ mod tests {
 
     use super::*;
 
+    fn obj(text: &str) -> TextObject {
+        TextObject { text: text.to_string(), x: 0.0, y: 0.0 }
+    }
+
+    fn collect(objects: Vec<TextObject>, currency: &'static iso::Currency) -> Vec<TransactionBuilder> {
+        TransactionRowIterator::new(objects.into_iter(), currency).collect()
+    }
+
+    #[test]
+    fn debit_reduces_balance() {
+        // balance drops 1500 → 1000 → transaction is debit of 500
+        let rows = collect(vec![
+            obj("01 Jan 2024"), obj("Opening Balance"), obj("¥1500"),
+            obj("01 Jan 2024"), obj("3:00 PM"), obj("FamilyMart"), obj("¥500"), obj("¥1000"),
+        ], iso::JPY);
+        assert_eq!(rows.len(), 1);
+        let mut b = rows.into_iter().next().unwrap();
+        let tx = b.account_id(1).build().unwrap();
+        assert_eq!(tx.debit, Some(500));
+        assert_eq!(tx.credit, None);
+        assert_eq!(tx.description, "FamilyMart");
+    }
+
+    #[test]
+    fn credit_increases_balance() {
+        // balance rises 1000 → 1500 → transaction is credit of 500
+        let rows = collect(vec![
+            obj("01 Jan 2024"), obj("Opening Balance"), obj("¥1000"),
+            obj("01 Jan 2024"), obj("10:30 AM"), obj("Refund"), obj("¥500"), obj("¥1500"),
+        ], iso::JPY);
+        assert_eq!(rows.len(), 1);
+        let mut b = rows.into_iter().next().unwrap();
+        let tx = b.account_id(1).build().unwrap();
+        assert_eq!(tx.credit, Some(500));
+        assert_eq!(tx.debit, None);
+    }
+
+    #[test]
+    fn multi_line_description() {
+        let rows = collect(vec![
+            obj("01 Jan 2024"), obj("Opening Balance"), obj("¥2000"),
+            obj("01 Jan 2024"), obj("2:00 PM"),
+            obj("Sushi Restaurant"), obj("Shibuya Tokyo"), obj("Floor 3"),
+            obj("¥800"), obj("¥1200"),
+        ], iso::JPY);
+        assert_eq!(rows.len(), 1);
+        let mut b = rows.into_iter().next().unwrap();
+        let tx = b.account_id(1).build().unwrap();
+        assert_eq!(tx.description, "Sushi Restaurant");
+        assert_eq!(tx.ref1, "Shibuya Tokyo");
+        assert_eq!(tx.ref2, "Floor 3");
+    }
+
+    #[test]
+    fn multiple_transactions_sequential() {
+        let rows = collect(vec![
+            obj("01 Jan 2024"), obj("Opening Balance"), obj("¥5000"),
+            obj("01 Jan 2024"), obj("9:00 AM"), obj("Convenience"), obj("¥200"), obj("¥4800"),
+            obj("01 Jan 2024"), obj("12:00 PM"), obj("Ramen"), obj("¥900"), obj("¥3900"),
+        ], iso::JPY);
+        assert_eq!(rows.len(), 2);
+    }
+
+    #[test]
+    fn skips_non_transaction_tokens() {
+        // junk tokens before the first date should be skipped
+        let rows = collect(vec![
+            obj("YouTrip Statement"), obj("Page 1"), obj("Date"), obj("Description"),
+            obj("01 Jan 2024"), obj("Opening Balance"), obj("¥3000"),
+            obj("01 Jan 2024"), obj("1:00 PM"), obj("7-Eleven"), obj("¥150"), obj("¥2850"),
+        ], iso::JPY);
+        assert_eq!(rows.len(), 1);
+    }
+
     #[test]
     #[ignore]
     fn parse_actual_pdf() {

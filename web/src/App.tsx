@@ -1,8 +1,8 @@
 import { useSignal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import { api } from './api'
-import type { Account, Category } from './types'
-import { activeTab, filterAccount } from './store'
+import type { Category } from './types'
+import { accounts, activeTab, filterAccount } from './store'
 import { FilterBar } from './components/FilterBar'
 import { Summary } from './components/Summary'
 import { Transactions } from './components/Transactions'
@@ -11,14 +11,13 @@ import { Categories } from './components/Categories'
 // ── App ───────────────────────────────────────────────────────────────────────
 
 export function App() {
-  const accounts = useSignal<Account[]>([])
   const categories = useSignal<Category[]>([])
 
   useEffect(() => {
     api.accounts().then(a => {
       accounts.value = a
       if (localStorage.getItem('fintrack.account') === null && a.length > 0) {
-        filterAccount.value = a[0].name
+        filterAccount.value = a[0].number
       }
     })
     api.categories().then(c => { categories.value = c })

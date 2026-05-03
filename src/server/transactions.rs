@@ -82,10 +82,10 @@ fn default_limit() -> i64 {
 
 fn account_for_filter(
     conn: &rusqlite::Connection,
-    account: &str,
+    account_number: &str,
 ) -> anyhow::Result<Account> {
-    db::find_account(conn, account)?
-        .ok_or_else(|| anyhow!("account not found: {account}"))
+    db::find_account(conn, account_number)?
+        .ok_or_else(|| anyhow!("account not found: {account_number}"))
 }
 
 fn query_summary(
@@ -205,7 +205,7 @@ fn query_transactions(
             row.get(0)
         })?;
 
-    // Data query with pagination
+    // Data query with pagination; fetch raw amounts + currency for per-row conversion
     let mut paginated_vals = vals.clone();
     paginated_vals.push(p.limit.to_string());
     paginated_vals.push(p.offset.to_string());
