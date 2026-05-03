@@ -111,8 +111,9 @@ impl<'a> Iterator for PdfTextIterator<'a> {
                     current_text.clear();
                 }
                 "Tf" => {
-                    // text-font
-                    if let Ok(font) = op.operands.first().unwrap().as_name() {
+                    // Missing operand means font switch failed; abort rather than
+                    // decode subsequent text with a stale/wrong encoding.
+                    if let Ok(font) = op.operands.first()?.as_name() {
                         self.current_font = Some(font.to_vec());
                     }
                 }
@@ -146,7 +147,7 @@ impl<'a> Iterator for PdfTextIterator<'a> {
                     }
                 }
                 "Tm" => {
-                    if let [x, y] = &op.operands[4..6] {
+                    if let Some([x, y]) = op.operands.get(4..6) {
                         current_coords = Some((
                             x.as_float().unwrap_or_default(),
                             y.as_float().unwrap_or_default(),
@@ -154,7 +155,7 @@ impl<'a> Iterator for PdfTextIterator<'a> {
                     }
                 }
                 "Td" => {
-                    if let [x, y] = &op.operands[0..2] {
+                    if let Some([x, y]) = op.operands.get(0..2) {
                         current_coords = Some((
                             x.as_float().unwrap_or_default(),
                             y.as_float().unwrap_or_default(),

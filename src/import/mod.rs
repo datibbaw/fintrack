@@ -1,6 +1,7 @@
 use crate::{
     db::find_account,
     models::{Account, Transaction, TransactionBuilder},
+    money::HasCurrency,
 };
 use anyhow::{anyhow, Context, Result};
 use chrono::NaiveDate;
@@ -48,19 +49,18 @@ pub fn import_csv<P: AsRef<std::path::Path>>(
         }
     };
 
+    let currency = account.currency();
+
     if let Some(file_currency) = data.currency {
-        if account.currency != file_currency {
+        if currency.iso_alpha_code != file_currency {
             anyhow::bail!(
                 "currency mismatch: file has '{}', but account '{}' has currency '{}'",
                 file_currency,
                 account.name,
-                account.currency
+                currency.iso_alpha_code
             );
         }
     }
-
-    let currency = account.iso_currency()
-        .ok_or_else(|| anyhow!("unknown currency: '{}'", account.currency))?;
 
     let mut importer = Importer::new(conn, account.clone());
     for row in data.rows {
@@ -80,9 +80,7 @@ pub fn import_pdf_youtrip<P: AsRef<std::path::Path>>(
     path: P,
     account: &Account,
 ) -> Result<ImportResult> {
-    let currency = account
-        .iso_currency()
-        .ok_or_else(|| anyhow!("unknown currency: '{}'", account.currency))?;
+    let currency = account.currency();
     let mut importer = Importer::new(conn, account.clone());
     for mut builder in pdf_youtrip::parse(path, currency)? {
         match builder.account_id(account.id).build() {

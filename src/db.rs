@@ -1,8 +1,7 @@
-use std::vec;
-
 use anyhow::Result;
 use rusqlite::{functions::FunctionFlags, params, Connection};
 use rusqlite_migration::{Migrations, M};
+use rusty_money::iso::Currency;
 use serde_rusqlite::{from_row, from_rows};
 use sha2::{Digest, Sha256};
 
@@ -43,7 +42,7 @@ fn migrations() -> Migrations<'static> {
 
 // ── Query helpers ─────────────────────────────────────────────────────────────
 
-/// Build a WHERE clause fragment and bind values for date + account filters.
+/// Build a WHERE clause fragment and bind values for date filters.
 pub fn build_filters(
     from: Option<&str>,
     to: Option<&str>,
@@ -75,11 +74,11 @@ pub fn add_account(
     name: &str,
     number: &str,
     bank: &str,
-    currency: &str,
+    currency: &Currency,
 ) -> Result<i64> {
     conn.execute(
         "INSERT INTO accounts (name, number, bank, currency) VALUES (?1, ?2, ?3, ?4)",
-        params![name, number, bank, currency],
+        params![name, number, bank, currency.iso_alpha_code],
     )?;
     Ok(conn.last_insert_rowid())
 }

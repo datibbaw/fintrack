@@ -76,7 +76,7 @@ export function FilterBar({ accounts }: Props) {
           }}
         >
           {accounts.map(a => (
-            <option key={a.id} value={a.name}>{a.name}</option>
+            <option key={a.id} value={a.number}>{a.name}</option>
           ))}
         </select>
       </div>

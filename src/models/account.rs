@@ -1,4 +1,7 @@
+use rusty_money::{Money, iso::Currency};
 use tabled::Tabled;
+
+use crate::money::{CurrencyCode, HasCurrency};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Tabled)]
 #[tabled(rename_all = "PascalCase")]
@@ -7,15 +10,18 @@ pub struct Account {
     pub name: String,
     pub number: String,
     pub bank: String,
-    pub currency: String,
+    #[tabled(skip)]
+    pub currency: CurrencyCode,
 }
 
+crate::impl_has_currency!(Account);
+
 impl Account {
-    pub fn iso_currency(&self) -> Option<&'static rusty_money::iso::Currency> {
-        rusty_money::iso::find(self.currency.as_str())
+    pub fn currency_factor(&self) -> i64 {
+        10i64.pow(self.currency().exponent)
     }
 
-    pub fn currency_factor(&self) -> i64 {
-        self.iso_currency().map(|c| 10_i64.pow(c.exponent)).unwrap_or(100)
+    pub fn amount_from_minor(&self, minor: i64) -> Money<'_, Currency> {
+        Money::from_minor(minor, self.currency())
     }
 }
