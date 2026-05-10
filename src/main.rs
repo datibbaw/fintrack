@@ -258,7 +258,10 @@ fn main() -> Result<()> {
                         .ok_or_else(|| anyhow!("Account must be specified for PDF import"))?;
                     let account = find_account(&conn, &account)?
                         .ok_or_else(|| anyhow!("Account not found: '{account}'"))?;
-                    import::import_pdf_youtrip(&conn, &file, &account)?
+                    match account.bank.to_ascii_lowercase().as_str() {
+                        "citibank" | "citi" => import::import_pdf_citibank(&conn, &file, &account)?,
+                        _ => import::import_pdf_youtrip(&conn, &file, &account)?,
+                    }
                 }
                 _ => import::import_csv(&conn, &file, account)?,
             };

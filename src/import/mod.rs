@@ -9,6 +9,7 @@ use rusqlite::Connection;
 use rusty_money::{iso, Money};
 
 mod csv;
+mod pdf_citibank;
 mod pdf_youtrip;
 mod qif;
 pub mod specs;
@@ -69,6 +70,22 @@ pub fn import_csv<P: AsRef<std::path::Path>>(
                 Err(e) => eprintln!("Warning: failed to build transaction from CSV row: {:?}", e),
             },
             Err(e) => eprintln!("Warning: failed to parse CSV row: {:?}", e),
+        }
+    }
+    Ok(importer.finish())
+}
+
+pub fn import_pdf_citibank<P: AsRef<std::path::Path>>(
+    conn: &Connection,
+    path: P,
+    account: &Account,
+) -> Result<ImportResult> {
+    let currency = account.currency();
+    let mut importer = Importer::new(conn, account.clone());
+    for mut builder in pdf_citibank::parse(path, currency)? {
+        match builder.account_id(account.id).build() {
+            Ok(t) => importer.insert(t)?,
+            Err(e) => eprintln!("Warning: failed to build transaction from PDF row: {:?}", e),
         }
     }
     Ok(importer.finish())
