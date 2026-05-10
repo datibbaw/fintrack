@@ -174,7 +174,7 @@ impl<I: Iterator<Item = Token>> TransactionParser<I> {
         if let Some(r) = it.next() {
             builder.ref3(r);
         }
-        let prev = self.prev_balance.unwrap_or(0);
+        let prev = self.prev_balance.replace(balance).unwrap_or(0);
         if balance > prev {
             builder.credit(Some(amount));
             builder.debit(None);
@@ -207,9 +207,7 @@ impl<I: Iterator<Item = Token>> Iterator for TransactionParser<I> {
                     let Some(balance) = self.next_amount() else {
                         continue;
                     };
-                    let builder = self.build(date, descs, amount, balance);
-                    self.prev_balance = Some(balance);
-                    return Some(builder);
+                    return Some(self.build(date, descs, amount, balance));
                 }
                 _ => (),
             }
