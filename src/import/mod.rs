@@ -3,8 +3,7 @@ use crate::{
     models::{Account, Transaction, TransactionBuilder},
     money::HasCurrency,
 };
-use anyhow::{anyhow, Context, Result};
-use chrono::NaiveDate;
+use anyhow::{anyhow, Result};
 use rusqlite::Connection;
 use rusty_money::{iso, Money};
 
@@ -19,6 +18,21 @@ pub struct ImportResult {
     pub account: Account,
     pub imported: usize,
     pub skipped: usize,
+    pub errored: usize,
+}
+
+#[derive(Default)]
+pub(crate) struct ParseData {
+    pub account_number: Option<String>,
+    pub currency: Option<String>,
+    pub records: Vec<Box<dyn AsTransactionBuilder>>,
+}
+
+pub(crate) trait AsTransactionBuilder {
+    fn as_transaction_builder(
+        &self,
+        currency: &'static iso::Currency,
+    ) -> Result<TransactionBuilder>;
 }
 
 /// Imports transactions from a CSV file using the ReaderSpec.
@@ -28,145 +42,34 @@ pub fn import_csv<P: AsRef<std::path::Path>>(
     account_number: Option<String>,
 ) -> Result<ImportResult> {
     let data = csv::parse(path)?;
-
-    let account = match (account_number, data.account_number) {
-        (Some(num), Some(file_num)) if num != file_num => {
-            anyhow::bail!(
-                "account number mismatch: file has '{}', argument is '{}'",
-                file_num,
-                num
-            );
-        }
-        (Some(num), _) => {
-            find_account(conn, &num)?.ok_or_else(|| anyhow!("Account not found: '{num}'"))?
-        }
-        (None, Some(file_num)) => find_account(conn, &file_num)?
-            .ok_or_else(|| anyhow!("Account not found: '{file_num}'"))?,
-        (None, None) => {
-            anyhow::bail!(
-                "Account number must be specified either as a command-line argument or in the file"
-            );
-        }
-    };
-
-    let currency = account.currency();
-
-    if let Some(file_currency) = data.currency {
-        if currency.iso_alpha_code != file_currency {
-            anyhow::bail!(
-                "currency mismatch: file has '{}', but account '{}' has currency '{}'",
-                file_currency,
-                account.name,
-                currency.iso_alpha_code
-            );
-        }
-    }
-
-    let mut importer = Importer::new(conn, account.clone());
-    for row in data.rows {
-        match row_into_builder(row, currency) {
-            Ok(mut builder) => match builder.account_id(account.id).build() {
-                Ok(t) => importer.insert(t)?,
-                Err(e) => eprintln!("Warning: failed to build transaction from CSV row: {:?}", e),
-            },
-            Err(e) => eprintln!("Warning: failed to parse CSV row: {:?}", e),
-        }
-    }
-    Ok(importer.finish())
+    Importer::new(conn, account_number).import_data(data)
 }
 
 pub fn import_pdf_citibank<P: AsRef<std::path::Path>>(
     conn: &Connection,
     path: P,
-    account: &Account,
+    account_number: Option<String>,
 ) -> Result<ImportResult> {
-    let currency = account.currency();
-    let mut importer = Importer::new(conn, account.clone());
-    for mut builder in pdf_citibank::parse(path, currency)? {
-        match builder.account_id(account.id).build() {
-            Ok(t) => importer.insert(t)?,
-            Err(e) => eprintln!("Warning: failed to build transaction from PDF row: {:?}", e),
-        }
-    }
-    Ok(importer.finish())
+    let data = pdf_citibank::parse(path)?;
+    Importer::new(conn, account_number).import_data(data)
 }
 
 pub fn import_pdf_youtrip<P: AsRef<std::path::Path>>(
     conn: &Connection,
     path: P,
-    account: &Account,
+    account_number: Option<String>,
 ) -> Result<ImportResult> {
-    let currency = account.currency();
-    let mut importer = Importer::new(conn, account.clone());
-    for mut builder in pdf_youtrip::parse(path, currency)? {
-        match builder.account_id(account.id).build() {
-            Ok(t) => importer.insert(t)?,
-            Err(e) => eprintln!("Warning: failed to build transaction from PDF row: {:?}", e),
-        }
-    }
-    Ok(importer.finish())
+    let data = pdf_youtrip::parse(path)?;
+    Importer::new(conn, account_number).import_data(data)
 }
 
 pub fn import_qif<P: AsRef<std::path::Path>>(
     conn: &Connection,
     path: P,
-    account: &Account,
+    account_number: Option<String>,
 ) -> Result<ImportResult> {
-    let mut importer = Importer::new(conn, account.clone());
-    for mut builder in qif::parse(path)? {
-        match builder.account_id(account.id).build() {
-            Ok(t) => importer.insert(t)?,
-            Err(e) => eprintln!(
-                "Warning: failed to build transaction from QIF row, error: {:?}",
-                e
-            ),
-        }
-    }
-    Ok(importer.finish())
-}
-
-fn row_into_builder(row: csv::Row, currency: &iso::Currency) -> Result<TransactionBuilder> {
-    let mut builder = TransactionBuilder::default();
-    for (field, value) in row {
-        match field {
-            csv::Field::Date { date_format } => {
-                builder.date(
-                    NaiveDate::parse_from_str(&value, &date_format)
-                        .with_context(|| format!("failed to parse date: '{}'", value))?,
-                );
-            }
-            csv::Field::Debit => {
-                builder.debit(parse_amount(&value, currency)?);
-            }
-            csv::Field::Credit => {
-                builder.credit(parse_amount(&value, currency)?);
-            }
-            csv::Field::Amount { invert } => {
-                if let Some(n) = parse_amount(&value, currency)? {
-                    builder.amount(if invert.unwrap_or(false) { -n } else { n });
-                }
-            }
-            csv::Field::Code => {
-                builder.code(value);
-            }
-            csv::Field::Description => {
-                builder.description(value);
-            }
-            csv::Field::Ref1 => {
-                builder.ref1(value);
-            }
-            csv::Field::Ref2 => {
-                builder.ref2(value);
-            }
-            csv::Field::Ref3 => {
-                builder.ref3(value);
-            }
-            csv::Field::Status => {
-                builder.status(value);
-            }
-        }
-    }
-    Ok(builder)
+    let data = qif::parse(path)?;
+    Importer::new(conn, account_number).import_data(data)
 }
 
 fn parse_amount(s: &str, currency: &iso::Currency) -> Result<Option<i64>> {
@@ -180,22 +83,83 @@ fn parse_amount(s: &str, currency: &iso::Currency) -> Result<Option<i64>> {
 
 struct Importer<'a> {
     conn: &'a Connection,
-    account: Account,
-    imported: usize,
-    skipped: usize,
+    account_number: Option<String>,
 }
 
 impl<'a> Importer<'a> {
-    fn new(conn: &'a Connection, account: Account) -> Self {
+    fn new(conn: &'a Connection, account_number: Option<String>) -> Self {
         Self {
             conn,
-            account,
-            imported: 0,
-            skipped: 0,
+            account_number,
         }
     }
 
-    fn insert(&mut self, t: Transaction) -> Result<()> {
+    fn import_data(&self, data: ParseData) -> Result<ImportResult> {
+        use InsertResult::*;
+
+        let account = match (&self.account_number, &data.account_number) {
+            (Some(num), Some(file_num)) if *num != *file_num => {
+                anyhow::bail!(
+                    "account number mismatch: file has '{}', argument is '{}'",
+                    file_num,
+                    num
+                );
+            }
+            (Some(num), _) => find_account(self.conn, num)?
+                .ok_or_else(|| anyhow!("Account not found: '{num}'"))?,
+            (None, Some(file_num)) => find_account(self.conn, file_num)?
+                .ok_or_else(|| anyhow!("Account not found: '{file_num}'"))?,
+            (None, None) => {
+                anyhow::bail!(
+                        "Account number must be specified either as a command-line argument or in the file"
+                    );
+            }
+        };
+
+        let currency = account.currency();
+
+        if let Some(file_currency) = &data.currency {
+            if currency.iso_alpha_code != file_currency {
+                anyhow::bail!(
+                    "currency mismatch: file has '{}', but account '{}' has currency '{}'",
+                    file_currency,
+                    account.name,
+                    currency.iso_alpha_code
+                );
+            }
+        }
+
+        let mut imported: usize = 0;
+        let mut skipped: usize = 0;
+        let mut errored: usize = 0;
+
+        for record in &data.records {
+            let transaction = record
+                .as_transaction_builder(currency)?
+                .account_id(account.id)
+                .build()?;
+
+            match self.insert(transaction) {
+                Ok(Inserted) => imported += 1,
+                Ok(Skipped) => skipped += 1,
+                Err(e) => {
+                    eprintln!("Warning: failed to insert transaction: {:?}", e);
+                    errored += 1;
+                }
+            }
+        }
+
+        Ok(ImportResult {
+            account,
+            imported,
+            skipped,
+            errored,
+        })
+    }
+
+    fn insert(&self, t: Transaction) -> Result<InsertResult> {
+        use InsertResult::*;
+
         let params = serde_rusqlite::to_params_named(&t)?;
         let n = self.conn.execute(
             "INSERT OR IGNORE INTO transactions \
@@ -203,21 +167,18 @@ impl<'a> Importer<'a> {
              VALUES (:account_id, :date, :code, :description, :ref1, :ref2, :ref3, :status, :debit, :credit, :hash)",
             params.to_slice().as_slice(),
         )?;
-        if n == 1 {
-            self.imported += 1;
-        } else {
-            self.skipped += 1;
-        }
-        Ok(())
-    }
 
-    fn finish(self) -> ImportResult {
-        ImportResult {
-            account: self.account,
-            imported: self.imported,
-            skipped: self.skipped,
+        if n == 1 {
+            Ok(Inserted)
+        } else {
+            Ok(Skipped)
         }
     }
+}
+
+enum InsertResult {
+    Inserted,
+    Skipped,
 }
 
 #[cfg(test)]
@@ -249,6 +210,7 @@ mod tests {
 
         assert_eq!(result.imported, 4);
         assert_eq!(result.skipped, 0);
+        assert_eq!(result.errored, 0);
 
         let (credit, ref1): (Option<i64>, String) = conn
             .query_row(
@@ -295,6 +257,7 @@ mod tests {
 
         assert_eq!(result.imported, 4);
         assert_eq!(result.skipped, 0);
+        assert_eq!(result.errored, 0);
     }
 
     #[test]
@@ -328,6 +291,7 @@ mod tests {
 
         assert_eq!(result.imported, 3);
         assert_eq!(result.skipped, 0);
+        assert_eq!(result.errored, 0);
     }
 
     #[test]
@@ -361,10 +325,12 @@ mod tests {
         let first = csv(&conn, path, "000-11111-1").unwrap();
         assert_eq!(first.imported, 4);
         assert_eq!(first.skipped, 0);
+        assert_eq!(first.errored, 0);
 
         let second = csv(&conn, path, "000-11111-1").unwrap();
         assert_eq!(second.imported, 0);
         assert_eq!(second.skipped, 4);
+        assert_eq!(second.errored, 0);
     }
 
     // ── QIF credit card ───────────────────────────────────────────────────────
@@ -373,20 +339,21 @@ mod tests {
     fn import_qif_imports_into_existing_account() {
         let (_dir, conn) = tmp_conn();
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/qif_ccard.qif");
-        let account = create_account(&conn, "541", "My Card").unwrap();
+        create_account(&conn, "541", "My Card").unwrap();
 
-        let result = import_qif(&conn, path, &account).unwrap();
+        let result = import_qif(&conn, path, Some("541".to_string())).unwrap();
 
         assert_eq!(result.imported, 4);
         assert_eq!(result.skipped, 0);
+        assert_eq!(result.errored, 0);
     }
 
     #[test]
     fn import_qif_debit_and_credit_stored_correctly() {
         let (_dir, conn) = tmp_conn();
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/qif_ccard.qif");
-        let account = create_account(&conn, "541", "My Card").unwrap();
-        import_qif(&conn, path, &account).unwrap();
+        create_account(&conn, "541", "My Card").unwrap();
+        import_qif(&conn, path, Some("541".to_string())).unwrap();
 
         let (debit, credit, description): (Option<i64>, Option<i64>, String) = conn
             .query_row(
@@ -422,6 +389,7 @@ mod tests {
 
         let result = csv(&conn, path, "378282246310005").unwrap();
         assert_eq!(result.imported, 3);
+        assert_eq!(result.errored, 0);
 
         let (debit, credit, date): (Option<i64>, Option<i64>, String) = conn
             .query_row(
@@ -456,10 +424,12 @@ mod tests {
         let first = csv(&conn, path, "378282246310005").unwrap();
         assert_eq!(first.imported, 3);
         assert_eq!(first.skipped, 0);
+        assert_eq!(first.errored, 0);
 
         let second = csv(&conn, path, "378282246310005").unwrap();
         assert_eq!(second.imported, 0);
         assert_eq!(second.skipped, 3);
+        assert_eq!(second.errored, 0);
     }
 
     // ── Conflict checks ───────────────────────────────────────────────────────
@@ -487,14 +457,16 @@ mod tests {
     fn import_qif_dedup_skips_on_reimport() {
         let (_dir, conn) = tmp_conn();
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/qif_ccard.qif");
-        let account = create_account(&conn, "541", "My Card").unwrap();
+        create_account(&conn, "541", "My Card").unwrap();
 
-        let first = import_qif(&conn, path, &account).unwrap();
+        let first = import_qif(&conn, path, Some("541".to_string())).unwrap();
         assert_eq!(first.imported, 4);
         assert_eq!(first.skipped, 0);
+        assert_eq!(first.errored, 0);
 
-        let second = import_qif(&conn, path, &account).unwrap();
+        let second = import_qif(&conn, path, Some("541".to_string())).unwrap();
         assert_eq!(second.imported, 0);
         assert_eq!(second.skipped, 4);
+        assert_eq!(second.errored, 0);
     }
 }

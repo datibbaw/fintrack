@@ -246,28 +246,28 @@ fn main() -> Result<()> {
                 .and_then(|e| e.to_str())
                 .map(|e| e.to_ascii_lowercase());
             let result = match ext.as_deref() {
-                Some("qif") => {
-                    let account = account
-                        .ok_or_else(|| anyhow!("Account must be specified for QIF import"))?;
-                    let account = find_account(&conn, &account)?
-                        .ok_or_else(|| anyhow!("Account not found: '{account}'"))?;
-                    import::import_qif(&conn, &file, &account)?
-                }
+                Some("qif") => import::import_qif(&conn, &file, account)?,
                 Some("pdf") => {
-                    let account = account
+                    let account_num = account
                         .ok_or_else(|| anyhow!("Account must be specified for PDF import"))?;
-                    let account = find_account(&conn, &account)?
-                        .ok_or_else(|| anyhow!("Account not found: '{account}'"))?;
+                    let account = find_account(&conn, &account_num)?
+                        .ok_or_else(|| anyhow!("Account not found: '{account_num}'"))?;
                     match account.bank.to_ascii_lowercase().as_str() {
-                        "citibank" | "citi" => import::import_pdf_citibank(&conn, &file, &account)?,
-                        _ => import::import_pdf_youtrip(&conn, &file, &account)?,
+                        "youtrip" => {
+                            import::import_pdf_youtrip(&conn, &file, Some(account.number))?
+                        }
+                        _ => import::import_pdf_citibank(&conn, &file, Some(account.number))?,
                     }
                 }
                 _ => import::import_csv(&conn, &file, account)?,
             };
             println!(
-                "Account : {} ({})\nImported: {}  |  Skipped (duplicates): {}",
-                result.account.name, result.account.number, result.imported, result.skipped,
+                "Account : {} ({})\nImported: {}  |  Skipped (duplicates): {}  |  Errors: {}",
+                result.account.name,
+                result.account.number,
+                result.imported,
+                result.skipped,
+                result.errored,
             );
             if result.imported > 0 {
                 let categorized = categorize::apply_rules(&conn)?;

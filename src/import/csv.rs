@@ -1,28 +1,90 @@
-use std::{collections::HashMap, path::Path};
+use std::{collections::HashMap, ops::Deref, path::Path};
 
-use crate::import::specs;
-use anyhow::{anyhow, Result};
+use crate::{
+    import::{parse_amount, specs, AsTransactionBuilder, ParseData},
+    models::TransactionBuilder,
+};
+use anyhow::{anyhow, Context, Result};
+use chrono::NaiveDate;
 use csv::StringRecord;
 use regex::Regex;
+use rusty_money::iso;
 use serde::Deserialize;
 
 const CSV_SPEC: &str = "csv.yaml";
 
 #[derive(Deserialize)]
-pub(super) struct Spec {
+struct Spec {
     account_number: Vec<ValueSpec>,
     currency: Vec<ValueSpec>,
     row_formats: Vec<RowFormat>,
 }
 
-#[derive(Default)]
-pub(super) struct Data {
-    pub(super) account_number: Option<String>,
-    pub(super) currency: Option<String>,
-    pub(super) rows: Vec<Row>,
+struct Row(Vec<(Field, String)>);
+
+impl Deref for Row {
+    type Target = Vec<(Field, String)>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
-pub(super) type Row = Vec<(Field, String)>;
+impl FromIterator<(Field, String)> for Row {
+    fn from_iter<I: IntoIterator<Item = (Field, String)>>(iter: I) -> Self {
+        // Collect the iterator into the inner Vec first, then wrap it
+        Row(iter.into_iter().collect())
+    }
+}
+
+impl AsTransactionBuilder for Row {
+    fn as_transaction_builder(
+        &self,
+        currency: &'static iso::Currency,
+    ) -> Result<TransactionBuilder> {
+        let mut builder = TransactionBuilder::default();
+        for (field, value) in self.deref() {
+            match field {
+                Field::Date { date_format } => {
+                    builder.date(
+                        NaiveDate::parse_from_str(value, date_format)
+                            .with_context(|| format!("failed to parse date: '{}'", value))?,
+                    );
+                }
+                Field::Debit => {
+                    builder.debit(parse_amount(value, currency)?);
+                }
+                Field::Credit => {
+                    builder.credit(parse_amount(value, currency)?);
+                }
+                Field::Amount { invert } => {
+                    if let Some(n) = parse_amount(value, currency)? {
+                        builder.amount(if invert.unwrap_or(false) { -n } else { n });
+                    }
+                }
+                Field::Code => {
+                    builder.code(value.clone());
+                }
+                Field::Description => {
+                    builder.description(value.clone());
+                }
+                Field::Ref1 => {
+                    builder.ref1(value.clone());
+                }
+                Field::Ref2 => {
+                    builder.ref2(value.clone());
+                }
+                Field::Ref3 => {
+                    builder.ref3(value.clone());
+                }
+                Field::Status => {
+                    builder.status(value.clone());
+                }
+            }
+        }
+        Ok(builder)
+    }
+}
 
 #[derive(Clone, PartialEq, Eq, Hash, Deserialize)]
 #[serde(tag = "field", rename_all = "lowercase")]
@@ -39,7 +101,7 @@ pub(super) enum Field {
     Amount { invert: Option<bool> },
 }
 
-pub(super) fn parse<P: AsRef<Path>>(path: P) -> Result<Data> {
+pub(super) fn parse<P: AsRef<Path>>(path: P) -> Result<ParseData> {
     let spec: Spec = specs::load(CSV_SPEC)?;
     let reader = csv::ReaderBuilder::new()
         .has_headers(false)
@@ -153,8 +215,8 @@ impl Spec {
         None
     }
 
-    fn parse<R: std::io::Read>(&self, mut reader: csv::Reader<R>) -> Result<Data> {
-        let mut data = Data::default();
+    fn parse<R: std::io::Read>(&self, mut reader: csv::Reader<R>) -> Result<ParseData> {
+        let mut data = ParseData::default();
         let mut row_format: Option<&RowFormat> = None;
 
         for (row_number, record) in reader.records().enumerate() {
@@ -176,7 +238,7 @@ impl Spec {
             .fields_by_index();
 
         for record in reader.records() {
-            let row = record?
+            let row: Row = record?
                 .into_iter()
                 .enumerate()
                 .filter_map(|(idx, cell)| {
@@ -185,7 +247,7 @@ impl Spec {
                 })
                 .collect();
 
-            data.rows.push(row);
+            data.records.push(Box::new(row));
         }
         Ok(data)
     }
@@ -220,7 +282,11 @@ fn parse_cell_ref(s: &str) -> (usize, usize) {
 
     (
         col.saturating_sub(1),
-        row_str.parse::<usize>().unwrap_or(1).saturating_sub(1),
+        row_str
+            .parse::<usize>()
+            .ok()
+            .map(|r| r.saturating_sub(1))
+            .unwrap_or(0),
     )
 }
 
@@ -253,6 +319,6 @@ mod tests {
     fn parse_9col() {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/dbs_9col.csv");
         let result = parse(path).unwrap();
-        assert_eq!(result.rows.len(), 4);
+        assert_eq!(result.records.len(), 4);
     }
 }
