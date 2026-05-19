@@ -3,41 +3,69 @@ use std::{fs, path::Path};
 use anyhow::{Context, Result};
 use chrono::NaiveDate;
 use qif_parser::transaction::QifTransaction;
+use rusty_money::iso;
 
-use crate::models::TransactionBuilder;
+use crate::{
+    import::{AsTransactionBuilder, ParseData},
+    models::TransactionBuilder,
+};
 
 const QIF_INPUT_DATE_FORMAT: &str = "%d/%m/%Y";
 const QIF_OUTPUT_DATE_FORMAT: &str = "%Y-%m-%d";
 
-pub(super) fn parse<P: AsRef<Path>>(path: P) -> Result<Vec<TransactionBuilder>> {
+struct QifRecord {
+    date: NaiveDate,
+    description: String,
+    code: String,
+    ref1: String,
+    status: String,
+    amount: i64,
+}
+
+impl AsTransactionBuilder for QifRecord {
+    fn as_transaction_builder(
+        &self,
+        _currency: &'static iso::Currency,
+    ) -> Result<TransactionBuilder> {
+        let mut builder = TransactionBuilder::default();
+        builder
+            .amount(self.amount)
+            .date(self.date)
+            .code(self.code.clone())
+            .description(self.description.clone())
+            .ref1(self.ref1.clone())
+            .status(self.status.clone());
+        Ok(builder)
+    }
+}
+
+pub(super) fn parse<P: AsRef<Path>>(path: P) -> Result<ParseData> {
     let content = fs::read_to_string(path.as_ref())
         .with_context(|| format!("cannot read file: {}", path.as_ref().to_string_lossy()))?;
     let content = content.strip_prefix('\u{FEFF}').unwrap_or(&content);
     let qif = qif_parser::parse(content, QIF_INPUT_DATE_FORMAT)
         .map_err(|e| anyhow::anyhow!("QIF parse error: {e}"))?;
-    Ok(qif.transactions.into_iter().map(into_builder).collect())
+    let mut data = ParseData::default();
+    for tx in qif.transactions {
+        data.records.push(Box::new(into_record(tx)));
+    }
+    Ok(data)
 }
 
-fn into_builder(tx: QifTransaction) -> TransactionBuilder {
-    let mut builder = TransactionBuilder::default();
-
-    // Collapse runs of whitespace in the payee string (DBS pads merchant
-    // names to fixed-width columns).
+fn into_record(tx: QifTransaction) -> QifRecord {
     let description = tx.payee.split_whitespace().collect::<Vec<_>>().join(" ");
-    // Safe to unwrap because qif_parser has already validated it
+    // Safe to unwrap because qif_parser has already validated the date format
     let date = NaiveDate::parse_from_str(&tx.date, QIF_OUTPUT_DATE_FORMAT)
         .with_context(|| format!("failed to parse date: {}", tx.date))
         .unwrap();
-
-    builder
-        .amount((tx.amount * 100.0).round() as i64)
-        .date(date)
-        .code(tx.number_of_the_check.to_string())
-        .description(description)
-        .ref1(tx.memo.to_string())
-        .status(tx.cleared_status.to_string());
-
-    builder
+    QifRecord {
+        date,
+        description,
+        code: tx.number_of_the_check.to_string(),
+        ref1: tx.memo.to_string(),
+        status: tx.cleared_status.to_string(),
+        amount: (tx.amount * 100.0).round() as i64,
+    }
 }
 
 #[cfg(test)]
@@ -46,17 +74,25 @@ mod tests {
 
     const FIXTURE_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/qif_ccard.qif");
 
+    fn build(record: &dyn AsTransactionBuilder) -> crate::models::Transaction {
+        record
+            .as_transaction_builder(&iso::SGD)
+            .unwrap()
+            .account_id(1)
+            .build()
+            .unwrap()
+    }
+
     #[test]
     fn parse_row_count() {
         let parsed = parse(FIXTURE_PATH).unwrap();
-        assert_eq!(parsed.len(), 4);
+        assert_eq!(parsed.records.len(), 4);
     }
 
     #[test]
     fn parse_debit_transaction() {
-        let mut parsed = parse(FIXTURE_PATH).unwrap();
-        // First row: T-39.00 → debit
-        let tx = parsed.remove(0).account_id(1).build().unwrap();
+        let parsed = parse(FIXTURE_PATH).unwrap();
+        let tx = build(parsed.records[0].as_ref());
         assert_eq!(tx.date.to_string(), "2026-04-02");
         assert_eq!(tx.description, "SASCO SENIOR CITIZENS SINGAPORE SG");
         assert_eq!(tx.debit, Some(3900));
@@ -66,9 +102,8 @@ mod tests {
 
     #[test]
     fn parse_credit_transaction() {
-        let mut parsed = parse(FIXTURE_PATH).unwrap();
-        // Second row: T39.00 → credit (inbound payment)
-        let tx = parsed.remove(1).account_id(1).build().unwrap();
+        let parsed = parse(FIXTURE_PATH).unwrap();
+        let tx = build(parsed.records[1].as_ref());
         assert_eq!(tx.date.to_string(), "2026-03-26");
         assert_eq!(tx.description, "INBOUND FT PYMT");
         assert_eq!(tx.debit, None);
@@ -77,18 +112,16 @@ mod tests {
 
     #[test]
     fn parse_memo_and_number_fields() {
-        let mut parsed = parse(FIXTURE_PATH).unwrap();
-        // Third row has a memo and number
-        let tx = parsed.remove(2).account_id(1).build().unwrap();
+        let parsed = parse(FIXTURE_PATH).unwrap();
+        let tx = build(parsed.records[2].as_ref());
         assert_eq!(tx.code, "REF001");
         assert_eq!(tx.ref1, "Insurance payment");
     }
 
     #[test]
     fn parse_amount_with_comma_separator() {
-        let mut parsed = parse(FIXTURE_PATH).unwrap();
-        // Fourth row: T-1,234.56
-        let tx = parsed.remove(3).account_id(1).build().unwrap();
+        let parsed = parse(FIXTURE_PATH).unwrap();
+        let tx = build(parsed.records[3].as_ref());
         assert_eq!(tx.debit, Some(123456));
     }
 }

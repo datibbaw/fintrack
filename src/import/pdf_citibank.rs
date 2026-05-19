@@ -1,11 +1,14 @@
-use std::{collections::HashMap, path::Path, str::Lines, sync::LazyLock};
+use std::{path::Path, str::Lines, sync::LazyLock};
 
 use anyhow::Result;
 use chrono::{Datelike, NaiveDate};
 use regex::Regex;
 use rusty_money::{iso, Money};
 
-use crate::models::TransactionBuilder;
+use crate::{
+    import::{AsTransactionBuilder, ParseData},
+    models::TransactionBuilder,
+};
 
 static STATEMENT_DATE_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"Statement Date (\w{5,} \d{1,2}, \d{4})$").unwrap());
@@ -31,14 +34,35 @@ const MONTHS: [(&str, u32); 12] = [
     ("DEC", 12),
 ];
 
-static MONTH_TO_NUM: LazyLock<HashMap<&str, u32>> = LazyLock::new(|| HashMap::from(MONTHS));
+#[derive(Debug)]
+enum Amount {
+    Debit(String),
+    Credit(String),
+}
 
 #[derive(Debug)]
 struct Transaction {
-    day: u32,
-    month: u32,
+    date: NaiveDate,
     description: String,
-    amount: i64,
+    amount: Amount,
+}
+
+impl AsTransactionBuilder for Transaction {
+    fn as_transaction_builder(
+        &self,
+        currency: &'static iso::Currency,
+    ) -> Result<TransactionBuilder> {
+        let mut builder = TransactionBuilder::default();
+        let to_amount = |s: &str| Money::from_str(s, currency).map(|m| m.to_minor_units());
+        builder.date(self.date);
+        builder.description(self.description.clone());
+        let amount = match &self.amount {
+            Amount::Credit(value) => to_amount(value)?,
+            Amount::Debit(value) => -to_amount(value)?,
+        };
+        builder.amount(amount);
+        Ok(builder)
+    }
 }
 
 fn skip_until_transaction_date(iter: &mut Lines) -> Option<NaiveDate> {
@@ -49,7 +73,7 @@ fn skip_until_transaction_date(iter: &mut Lines) -> Option<NaiveDate> {
     })
 }
 
-fn full_transaction_date(day: u32, month: u32, statement_date: &NaiveDate) -> Option<NaiveDate> {
+fn full_transaction_date(day: u32, month: u32, statement_date: NaiveDate) -> Option<NaiveDate> {
     // transaction dates always come before statement dates
     let year = if month > statement_date.month() {
         // adjust for december transactions
@@ -60,51 +84,44 @@ fn full_transaction_date(day: u32, month: u32, statement_date: &NaiveDate) -> Op
     NaiveDate::from_ymd_opt(year, month, day)
 }
 
-fn parse_transaction(input: &str, currency: &'static iso::Currency) -> Option<Transaction> {
-    let to_amount = |s: &str| {
-        Money::from_str(s, currency)
-            .map(|m| m.to_minor_units())
-            .ok()
+fn parse_transaction(input: &str, statement_date: NaiveDate) -> Option<Transaction> {
+    let captures = STATEMENT_REGEX.captures(input)?;
+    let amount = match (captures.get(4), captures.get(5)) {
+        (Some(debit), None) => Amount::Debit(debit.as_str().to_string()),
+        (None, Some(credit)) => Amount::Credit(credit.as_str().to_string()),
+        _ => return None,
     };
-    STATEMENT_REGEX.captures(input).and_then(|caps| {
-        let amount = match (caps.get(4), caps.get(5)) {
-            (Some(amount), None) => to_amount(amount.as_str())?,
-            (None, Some(amount)) => -to_amount(amount.as_str())?,
-            _ => return None,
-        };
-        Some(Transaction {
-            day: caps.get(1)?.as_str().parse::<u32>().ok()?,
-            month: *MONTH_TO_NUM.get(caps.get(2)?.as_str())?,
-            description: caps.get(3)?.as_str().to_string(),
-            amount,
-        })
+    let month = captures.get(2)?.as_str();
+    let month = MONTHS
+        .iter()
+        .find(|(name, _)| *name == month)
+        .map(|(_, no)| *no)?;
+    let date = full_transaction_date(
+        captures.get(1)?.as_str().parse::<u32>().ok()?,
+        month,
+        statement_date,
+    )?;
+    Some(Transaction {
+        date,
+        description: captures.get(3)?.as_str().to_string(),
+        amount,
     })
 }
 
-pub(super) fn parse<P: AsRef<Path>>(
-    path: P,
-    currency: &'static iso::Currency,
-) -> Result<Vec<TransactionBuilder>> {
+pub(super) fn parse<P: AsRef<Path>>(path: P) -> Result<ParseData> {
     let text = pdf_extract::extract_text(path.as_ref())?;
     let mut lines = text.lines();
     let statement_date = skip_until_transaction_date(&mut lines)
         .ok_or_else(|| anyhow::anyhow!("could not find statement date in Citibank PDF"))?;
-    let builders = lines
-        .filter_map(|line| {
-            let tx = parse_transaction(line, currency)?;
-            let date = full_transaction_date(tx.day, tx.month, &statement_date)?;
-            let mut builder = TransactionBuilder::default();
-            builder.date(date);
-            builder.description(tx.description);
-            if tx.amount >= 0 {
-                builder.debit(Some(tx.amount));
-            } else {
-                builder.credit(Some(-tx.amount));
-            }
-            Some(builder)
-        })
-        .collect();
-    Ok(builders)
+    let mut data = ParseData::default();
+
+    for line in lines {
+        if let Some(transaction) = parse_transaction(line, statement_date) {
+            data.records.push(Box::new(transaction));
+        }
+    }
+
+    Ok(data)
 }
 
 #[cfg(test)]
@@ -119,15 +136,22 @@ mod tests {
         let path = env::var("PDF_FILE").expect("set PDF_FILE=/path/to/citibank-statement.pdf");
         let contents: Vec<u8> = std::fs::read(path).unwrap();
         let text = pdf_extract::extract_text_from_mem(&contents).unwrap();
-        let mut iter = text.lines().into_iter();
+
+        println!("{text}");
+        let mut iter = text.lines();
 
         let statement_date = skip_until_transaction_date(&mut iter).unwrap();
         println!("statement_date: {statement_date:?}");
 
-        iter.filter_map(|line| parse_transaction(line, &iso::SGD))
+        iter.filter_map(|line| parse_transaction(line, statement_date))
             .for_each(|t| {
-                let transaction_date = full_transaction_date(t.day, t.month, &statement_date);
-                println!("Transaction: {t:?} (transaction_date: {transaction_date:?})");
+                println!(
+                    "Transaction: {:?}",
+                    &t.as_transaction_builder(&iso::SGD)
+                        .unwrap()
+                        .build()
+                        .unwrap()
+                );
             });
     }
 }

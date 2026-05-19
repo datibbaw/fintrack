@@ -4,13 +4,16 @@ use nom::{
     branch::alt,
     bytes::complete::{tag, take_while1, take_while_m_n},
     character::complete::{one_of, space1},
-    combinator::{map_res, recognize},
+    combinator::recognize,
     IResult, Parser,
 };
-use rusty_money::{iso, Money};
+use rusty_money::iso;
 use std::path::Path;
 
-use crate::models::TransactionBuilder;
+use crate::{
+    import::{AsTransactionBuilder, ParseData},
+    models::TransactionBuilder,
+};
 
 // ── Tokens ────────────────────────────────────────────────────────────────────
 
@@ -42,7 +45,7 @@ fn date_from_str(input: &str) -> IResult<&str, NaiveDate> {
     ));
     let year = take_while_m_n(4, 4, |c: char| c.is_ascii_digit());
 
-    map_res(recognize((day, space1, month, space1, year)), |s: &str| {
+    nom::combinator::map_res(recognize((day, space1, month, space1, year)), |s: &str| {
         NaiveDate::parse_from_str(s, "%d %b %Y")
     })
     .parse(input)
@@ -56,40 +59,44 @@ fn time_from_str(input: &str) -> IResult<&str, &str> {
     recognize((hour, tag(":"), minute, space1, am_pm)).parse(input)
 }
 
-fn parse_amount_str<'a>(input: &'a str, currency: &'static iso::Currency) -> IResult<&'a str, i64> {
-    let parser = (
+// Drops commas and periods, leaving only digits — this gives minor units directly:
+// ¥123,148 → 123148 (JPY exponent=0), $10.50 → 1050 (SGD/USD exponent=2)
+fn parse_amount_str(input: &str) -> IResult<&str, i64> {
+    let (rest, (_, digits)) = (
         one_of("¥$€"),
         take_while1(|c: char| c.is_ascii_digit() || c == ',' || c == '.'),
-    );
-
-    map_res(parser, |(_, digits)| {
-        Money::from_str(digits, currency).map(|m| m.to_minor_units())
-    })
-    .parse(input)
+    )
+        .parse(input)?;
+    let minor: i64 = digits
+        .chars()
+        .filter(|c| c.is_ascii_digit())
+        .collect::<String>()
+        .parse()
+        .unwrap_or(0);
+    Ok((rest, minor))
 }
 
-fn tokenize_line(s: &str, currency: &'static iso::Currency) -> Vec<Token> {
+fn tokenize_line(s: &str) -> Vec<Token> {
     let s = s.trim();
     if s.is_empty() {
         return vec![];
     }
     if let Ok((rest, date)) = date_from_str(s) {
         let mut tokens = vec![Token::Date(date)];
-        tokens.extend(tokenize_line(rest, currency));
+        tokens.extend(tokenize_line(rest));
         return tokens;
     }
     if let Ok((rest, _)) = time_from_str(s) {
         let mut tokens = vec![Token::Time];
-        tokens.extend(tokenize_line(rest, currency));
+        tokens.extend(tokenize_line(rest));
         return tokens;
     }
 
     let mut result = Vec::new();
 
     let mut iter = s.split_whitespace().rev();
-    // Find longest suffix of amounts
     for part in &mut iter {
-        if let Ok(("", amount)) = parse_amount_str(part, currency) {
+        if let Ok(("", amount)) = parse_amount_str(part) {
             result.push(Token::Amount(amount));
         } else {
             let mut prefix: Vec<&str> = vec![part];
@@ -101,8 +108,37 @@ fn tokenize_line(s: &str, currency: &'static iso::Currency) -> Vec<Token> {
     }
 
     result.reverse();
-
     result
+}
+
+// ── Record type ───────────────────────────────────────────────────────────────
+
+struct YouTripRecord {
+    date: NaiveDate,
+    description: String,
+    ref1: String,
+    ref2: String,
+    ref3: String,
+    debit: Option<i64>,
+    credit: Option<i64>,
+}
+
+impl AsTransactionBuilder for YouTripRecord {
+    fn as_transaction_builder(
+        &self,
+        _currency: &'static iso::Currency,
+    ) -> anyhow::Result<TransactionBuilder> {
+        let mut builder = TransactionBuilder::default();
+        builder
+            .date(self.date)
+            .description(self.description.clone())
+            .ref1(self.ref1.clone())
+            .ref2(self.ref2.clone())
+            .ref3(self.ref3.clone())
+            .debit(self.debit)
+            .credit(self.credit);
+        Ok(builder)
+    }
 }
 
 // ── Transaction parser ────────────────────────────────────────────────────────
@@ -135,9 +171,7 @@ impl<I: Iterator<Item = Token>> TransactionParser<I> {
         for t in self.tokens.by_ref() {
             match t {
                 Token::Text(s) => descs.push(s),
-                Token::Amount(a) => {
-                    return Some((descs, a));
-                }
+                Token::Amount(a) => return Some((descs, a)),
                 _ => break,
             }
         }
@@ -160,38 +194,35 @@ impl<I: Iterator<Item = Token>> TransactionParser<I> {
         descs: Vec<String>,
         amount: i64,
         balance: i64,
-    ) -> TransactionBuilder {
-        let mut builder = TransactionBuilder::default();
-        builder.date(date);
+    ) -> YouTripRecord {
         let mut it = descs.into_iter();
-        builder.description(it.next().unwrap_or_default());
-        if let Some(r) = it.next() {
-            builder.ref1(r);
-        }
-        if let Some(r) = it.next() {
-            builder.ref2(r);
-        }
-        if let Some(r) = it.next() {
-            builder.ref3(r);
-        }
+        let description = it.next().unwrap_or_default();
+        let ref1 = it.next().unwrap_or_default();
+        let ref2 = it.next().unwrap_or_default();
+        let ref3 = it.next().unwrap_or_default();
         let prev = self.prev_balance.replace(balance).unwrap_or(0);
-        if balance > prev {
-            builder.credit(Some(amount));
-            builder.debit(None);
+        let (debit, credit) = if balance > prev {
+            (None, Some(amount))
         } else {
-            builder.debit(Some(amount));
-            builder.credit(None);
+            (Some(amount), None)
+        };
+        YouTripRecord {
+            date,
+            description,
+            ref1,
+            ref2,
+            ref3,
+            debit,
+            credit,
         }
-        builder
     }
 }
 
 impl<I: Iterator<Item = Token>> Iterator for TransactionParser<I> {
-    type Item = TransactionBuilder;
+    type Item = YouTripRecord;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            // Find next date
             let date = self.skip_until_date()?;
 
             match self.tokens.next()? {
@@ -217,17 +248,18 @@ impl<I: Iterator<Item = Token>> Iterator for TransactionParser<I> {
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
-pub(super) fn parse<P: AsRef<Path>>(
-    path: P,
-    currency: &'static iso::Currency,
-) -> Result<Vec<TransactionBuilder>> {
+pub(super) fn parse<P: AsRef<Path>>(path: P) -> Result<ParseData> {
     let text = pdf_extract::extract_text(path.as_ref())?;
     let tokens: Vec<Token> = text
         .lines()
         .filter(|l| !l.trim().is_empty())
-        .flat_map(|l| tokenize_line(l, currency))
+        .flat_map(tokenize_line)
         .collect();
-    Ok(TransactionParser::new(tokens.into_iter()).collect())
+    let mut data = ParseData::default();
+    for record in TransactionParser::new(tokens.into_iter()) {
+        data.records.push(Box::new(record));
+    }
+    Ok(data)
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -242,13 +274,22 @@ mod tests {
         NaiveDate::parse_from_str(s, "%d %b %Y").unwrap()
     }
 
-    fn collect_tokens(tokens: Vec<Token>) -> Vec<TransactionBuilder> {
+    fn collect_records(tokens: Vec<Token>) -> Vec<YouTripRecord> {
         TransactionParser::new(tokens.into_iter()).collect()
+    }
+
+    fn build(record: &YouTripRecord) -> crate::models::Transaction {
+        record
+            .as_transaction_builder(&iso::SGD)
+            .unwrap()
+            .account_id(1)
+            .build()
+            .unwrap()
     }
 
     #[test]
     fn debit_reduces_balance() {
-        let rows = collect_tokens(vec![
+        let rows = collect_records(vec![
             Token::Date(d("01 Jan 2024")),
             Token::Text("Opening Balance".into()),
             Token::Amount(1500),
@@ -259,8 +300,7 @@ mod tests {
             Token::Amount(1000),
         ]);
         assert_eq!(rows.len(), 1);
-        let mut b = rows.into_iter().next().unwrap();
-        let tx = b.account_id(1).build().unwrap();
+        let tx = build(&rows[0]);
         assert_eq!(tx.debit, Some(500));
         assert_eq!(tx.credit, None);
         assert_eq!(tx.description, "FamilyMart");
@@ -268,7 +308,7 @@ mod tests {
 
     #[test]
     fn credit_increases_balance() {
-        let rows = collect_tokens(vec![
+        let rows = collect_records(vec![
             Token::Date(d("01 Jan 2024")),
             Token::Text("Opening Balance".into()),
             Token::Amount(1000),
@@ -279,15 +319,14 @@ mod tests {
             Token::Amount(1500),
         ]);
         assert_eq!(rows.len(), 1);
-        let mut b = rows.into_iter().next().unwrap();
-        let tx = b.account_id(1).build().unwrap();
+        let tx = build(&rows[0]);
         assert_eq!(tx.credit, Some(500));
         assert_eq!(tx.debit, None);
     }
 
     #[test]
     fn multi_line_description() {
-        let rows = collect_tokens(vec![
+        let rows = collect_records(vec![
             Token::Date(d("01 Jan 2024")),
             Token::Text("Opening Balance".into()),
             Token::Amount(2000),
@@ -300,8 +339,7 @@ mod tests {
             Token::Amount(1200),
         ]);
         assert_eq!(rows.len(), 1);
-        let mut b = rows.into_iter().next().unwrap();
-        let tx = b.account_id(1).build().unwrap();
+        let tx = build(&rows[0]);
         assert_eq!(tx.description, "Sushi Restaurant");
         assert_eq!(tx.ref1, "Shibuya Tokyo");
         assert_eq!(tx.ref2, "Floor 3");
@@ -309,7 +347,7 @@ mod tests {
 
     #[test]
     fn multiple_transactions_sequential() {
-        let rows = collect_tokens(vec![
+        let rows = collect_records(vec![
             Token::Date(d("01 Jan 2024")),
             Token::Text("Opening Balance".into()),
             Token::Amount(5000),
@@ -329,7 +367,7 @@ mod tests {
 
     #[test]
     fn skips_non_transaction_tokens() {
-        let rows = collect_tokens(vec![
+        let rows = collect_records(vec![
             Token::Text("YouTrip Statement".into()),
             Token::Text("Page 1".into()),
             Token::Text("Date".into()),
@@ -348,19 +386,19 @@ mod tests {
 
     #[test]
     fn tokenize_date_only_line() {
-        let tokens = tokenize_line("8 Mar 2026", iso::JPY);
+        let tokens = tokenize_line("8 Mar 2026");
         assert!(matches!(tokens[..], [Token::Date(_)]));
     }
 
     #[test]
     fn tokenize_time_only_line() {
-        let tokens = tokenize_line("11:19 AM", iso::JPY);
+        let tokens = tokenize_line("11:19 AM");
         assert!(matches!(tokens[..], [Token::Time]));
     }
 
     #[test]
     fn tokenize_two_amounts_line() {
-        let tokens = tokenize_line(" ¥123,148 ¥124,284", iso::JPY);
+        let tokens = tokenize_line(" ¥123,148 ¥124,284");
         assert_eq!(tokens.len(), 2);
         assert!(matches!(tokens[0], Token::Amount(123148)));
         assert!(matches!(tokens[1], Token::Amount(124284)));
@@ -368,8 +406,7 @@ mod tests {
 
     #[test]
     fn tokenize_time_with_description_and_amounts() {
-        // "1:15 AM MANDAI TADA ,HYOGO ¥13,629 ¥222,570"
-        let tokens = tokenize_line("1:15 AM MANDAI TADA ,HYOGO ¥13,629 ¥222,570", iso::JPY);
+        let tokens = tokenize_line("1:15 AM MANDAI TADA ,HYOGO ¥13,629 ¥222,570");
         assert!(matches!(tokens[0], Token::Time));
         assert!(matches!(&tokens[1], Token::Text(s) if s == "MANDAI TADA ,HYOGO"));
         assert!(matches!(tokens[2], Token::Amount(13629)));
@@ -378,15 +415,14 @@ mod tests {
 
     #[test]
     fn tokenize_description_with_embedded_currency_not_split() {
-        // Amounts inside descriptions have trailing currency codes — kept as Text
-        let tokens = tokenize_line("$1,000.00 SGD to ¥123,148 JPY", iso::JPY);
+        let tokens = tokenize_line("$1,000.00 SGD to ¥123,148 JPY");
         assert_eq!(tokens.len(), 1);
         assert!(matches!(&tokens[0], Token::Text(s) if s.contains("SGD")));
     }
 
     #[test]
     fn tokenize_date_with_balance() {
-        let tokens = tokenize_line("1 Mar 2026 Opening Balance ¥1,136", iso::JPY);
+        let tokens = tokenize_line("1 Mar 2026 Opening Balance ¥1,136");
         assert!(matches!(tokens[0], Token::Date(_)));
         assert!(matches!(&tokens[1], Token::Text(s) if s == "Opening Balance"));
         assert!(matches!(tokens[2], Token::Amount(1136)));
@@ -408,8 +444,14 @@ mod tests {
     fn parse_actual_pdf() {
         // cargo test parse_actual_pdf -- --ignored --nocapture
         let path = env::var("PDF_FILE").expect("set PDF_FILE=/path/to/youtrip-statement.pdf");
-        for (i, mut builder) in parse(path, iso::JPY).unwrap().into_iter().enumerate() {
-            let tx = builder.account_id(1).build().unwrap();
+        let data = parse(path).unwrap();
+        for (i, record) in data.records.iter().enumerate() {
+            let tx = record
+                .as_transaction_builder(&iso::JPY)
+                .unwrap()
+                .account_id(1)
+                .build()
+                .unwrap();
             println!(
                 "{:2}. {} {:50} debit={:?} credit={:?}  ref1={}",
                 i + 1,
