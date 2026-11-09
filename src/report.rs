@@ -146,7 +146,7 @@ pub fn transactions(
     if uncategorized {
         filter_clause.push_str(" AND t.category_id IS NULL");
     } else if let Some(cat) = category {
-        filter_clause.push_str(" AND c.name = ?");
+        filter_clause.push_str(db::CATEGORY_TREE_FILTER);
         vals.push(cat.to_string());
     }
 

@@ -15,11 +15,28 @@ export interface Category {
   rule_count: number
 }
 
+export type TextField = 'code' | 'description' | 'ref1' | 'ref2' | 'ref3'
+/** Integer fields only support `equals` with an integer value. */
+export type IntegerField = 'amount'
+export type RuleField = TextField | IntegerField
+
+/** Exactly one of `equals` / `includes` / `matches` is present. */
+export type Condition =
+  | { field: IntegerField; equals: number }
+  | ({ field: TextField } & ({ equals: string } | { includes: string } | { matches: string }))
+
+/** All `and` conditions must match, plus at least one `or` condition (if any). */
+export interface Criteria {
+  and?: Condition[]
+  or?: Condition[]
+}
+
 export interface Rule {
   id: number
   category_id: number
-  field: string
-  pattern: string
+  /** When set, the rule only applies to this account's transactions. */
+  account_id: number | null
+  criteria: Criteria
   priority: number
 }
 

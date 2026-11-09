@@ -1,41 +1,9 @@
 use anyhow::Result;
 use rusqlite::{Connection, params};
-use serde::Deserialize;
 use serde_rusqlite::from_rows;
 
-use crate::{db, models::Rule};
+use crate::{db, models::Transaction};
 
-#[derive(Deserialize)]
-struct TransactionRow {
-    id: i64,
-    code: String,
-    description: String,
-    ref1: String,
-    ref2: String,
-    ref3: String,
-}
-
-impl TransactionRow {
-    fn matches_rule(&self, rule: &Rule) -> bool {
-        use crate::models::Field::*;
-
-        match rule.field {
-            Code => rule.pattern.is_match(&self.code),
-            Description => rule.pattern.is_match(&self.description),
-            Ref1 => rule.pattern.is_match(&self.ref1),
-            Ref2 => rule.pattern.is_match(&self.ref2),
-            Ref3 => rule.pattern.is_match(&self.ref3),
-            Any => {
-                // "any" — search all text fields
-                rule.pattern.is_match(&self.code)
-                    || rule.pattern.is_match(&self.description)
-                    || rule.pattern.is_match(&self.ref1)
-                    || rule.pattern.is_match(&self.ref2)
-                    || rule.pattern.is_match(&self.ref3)
-            }
-        }
-    }
-}
 /// Re-apply all categorisation rules to every transaction.
 /// The highest-priority matching rule wins. Transactions with no match are left
 /// as-is (existing category_id is preserved unless a rule now matches).
@@ -46,10 +14,13 @@ pub fn apply_rules(conn: &Connection) -> Result<usize> {
         return Ok(0);
     }
 
-    let mut stmt =
-        conn.prepare("SELECT id, code, description, ref1, ref2, ref3 FROM transactions")?;
+    let mut stmt = conn.prepare(
+        "SELECT id, account_id, date, code, description, ref1, ref2, ref3, \
+                status, debit, credit, hash \
+         FROM transactions",
+    )?;
 
-    let transactions: Vec<TransactionRow> = from_rows(stmt.query([])?)
+    let transactions: Vec<Transaction> = from_rows(stmt.query([])?)
         .collect::<serde_rusqlite::Result<Vec<_>>>()
         .map_err(|e| anyhow::anyhow!("failed to query transactions: {e}"))?;
 
@@ -61,7 +32,7 @@ pub fn apply_rules(conn: &Connection) -> Result<usize> {
         // assignment always takes precedence.
         let best = rules
             .iter()
-            .filter(|r| transaction.matches_rule(r))
+            .filter(|r| r.is_match(transaction))
             .max_by_key(|r| (r.priority, r.category_is_sub));
 
         if let Some(rule) = best {
@@ -99,7 +70,10 @@ mod tests {
         )
         .unwrap();
         let cat_id = crate::db::add_category(&conn, "Food", None).unwrap();
-        crate::db::add_rule(&conn, cat_id, "description", "McDonald", 0).unwrap();
+        let criteria =
+            serde_json::from_str(r#"{"and":[{"field":"description","matches":"McDonald"}]}"#)
+                .unwrap();
+        crate::db::add_rule(&conn, cat_id, None, &criteria, 0).unwrap();
 
         conn.execute(
             "INSERT INTO transactions \
@@ -135,7 +109,9 @@ mod tests {
         )
         .unwrap();
         let cat_id = crate::db::add_category(&conn, "Transport", None).unwrap();
-        crate::db::add_rule(&conn, cat_id, "description", "Grab", 0).unwrap();
+        let criteria =
+            serde_json::from_str(r#"{"and":[{"field":"description","matches":"Grab"}]}"#).unwrap();
+        crate::db::add_rule(&conn, cat_id, None, &criteria, 0).unwrap();
 
         conn.execute(
             "INSERT INTO transactions \
@@ -156,5 +132,39 @@ mod tests {
             )
             .unwrap();
         assert!(assigned.is_none());
+    }
+
+    #[test]
+    fn apply_rules_respects_account_scope() {
+        let conn = test_conn();
+        let sgd = iso::find("SGD").unwrap();
+        let acc_a = crate::db::add_account(&conn, "A", "ACC-A", "TEST", sgd).unwrap();
+        let acc_b = crate::db::add_account(&conn, "B", "ACC-B", "TEST", sgd).unwrap();
+        let cat_id = crate::db::add_category(&conn, "Rent", None).unwrap();
+        let criteria =
+            serde_json::from_str(r#"{"and":[{"field":"description","includes":"GIRO"}]}"#).unwrap();
+        crate::db::add_rule(&conn, cat_id, Some(acc_a), &criteria, 0).unwrap();
+
+        for (acc, hash) in [(acc_a, "hA"), (acc_b, "hB")] {
+            conn.execute(
+                "INSERT INTO transactions \
+                 (account_id, date, code, description, ref1, ref2, ref3, status, debit, credit, hash) \
+                 VALUES (?1, '2024-01-15', '', 'GIRO PAYMENT', '', '', '', '', 100, NULL, ?2)",
+                params![acc, hash],
+            )
+            .unwrap();
+        }
+
+        assert_eq!(apply_rules(&conn).unwrap(), 1);
+        let cat_of = |hash: &str| -> Option<i64> {
+            conn.query_row(
+                "SELECT category_id FROM transactions WHERE hash = ?1",
+                params![hash],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(cat_of("hA"), Some(cat_id));
+        assert_eq!(cat_of("hB"), None);
     }
 }

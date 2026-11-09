@@ -186,7 +186,7 @@ fn query_transactions(
     } else if let Some(cat) = &p.category
         && !cat.is_empty()
     {
-        filter_clause.push_str(" AND c.name = ?");
+        filter_clause.push_str(db::CATEGORY_TREE_FILTER);
         vals.push(cat.clone());
     }
 

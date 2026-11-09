@@ -5,7 +5,7 @@ mod transaction;
 
 pub(crate) use account::Account;
 pub(crate) use category::Category;
-pub(crate) use rule::{Field, Rule};
+pub(crate) use rule::{Condition, Criteria, Field, Matcher, Rule, Value};
 pub(crate) use transaction::{Transaction, TransactionBuilder};
 
 fn opt_string(v: &Option<String>) -> String {

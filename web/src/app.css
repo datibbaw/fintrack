@@ -714,6 +714,17 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   padding: .2rem .5rem;
 }
 
+.rule-criteria { display: flex; flex-direction: column; gap: .2rem; }
+.rule-group    { display: flex; flex-wrap: wrap; align-items: baseline; gap: .25rem .75rem; }
+.rule-group-label {
+  font-size: .72rem;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--text-muted);
+  min-width: 3.5rem;
+}
+.rule-op { color: var(--text-muted); }
+
 /* ── Regex syntax highlighting ─────────────────────────────────────────────── */
 
 .regex-hl {
