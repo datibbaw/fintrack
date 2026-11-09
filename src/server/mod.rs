@@ -78,10 +78,10 @@ pub async fn serve(conn: Connection, port: u16, open: bool) -> anyhow::Result<()
             get(categories::index).post(categories::create),
         )
         .route(
-            "/categories/:id",
+            "/categories/{id}",
             put(categories::update).delete(categories::destroy),
         )
-        .route("/categories/:id/rules", get(categories::rules))
+        .route("/categories/{id}/rules", get(categories::rules))
         .route("/summary", get(transactions::summary))
         .route("/transactions", get(transactions::index));
 
