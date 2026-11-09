@@ -198,7 +198,7 @@ fn query_transactions(
          JOIN  accounts a ON t.account_id = a.id \
          WHERE 1=1{filter_clause}"
     );
-    let total: usize =
+    let total: i64 =
         conn.query_row(&count_sql, rusqlite::params_from_iter(vals.iter()), |row| {
             row.get(0)
         })?;
@@ -229,7 +229,10 @@ fn query_transactions(
         from_rows::<TransactionDto>(stmt.query(rusqlite::params_from_iter(paginated_vals.iter()))?)
             .collect::<serde_rusqlite::Result<Vec<_>>>()?;
 
-    Ok(TransactionsResponse { rows, total })
+    Ok(TransactionsResponse {
+        rows,
+        total: usize::try_from(total)?,
+    })
 }
 
 pub async fn summary(
