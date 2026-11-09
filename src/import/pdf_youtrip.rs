@@ -3,8 +3,8 @@ use chrono::NaiveDate;
 use nom::{
     IResult, Parser,
     branch::alt,
-    bytes::complete::{tag, take_while_m_n, take_while1},
-    character::complete::{one_of, space1},
+    bytes::complete::{tag, take_while_m_n},
+    character::complete::space1,
     combinator::recognize,
 };
 use rusty_money::iso;
@@ -61,19 +61,13 @@ fn time_from_str(input: &str) -> IResult<&str, &str> {
 
 // Drops commas and periods, leaving only digits — this gives minor units directly:
 // ¥123,148 → 123148 (JPY exponent=0), $10.50 → 1050 (SGD/USD exponent=2)
-fn parse_amount_str(input: &str) -> IResult<&str, i64> {
-    let (rest, (_, digits)) = (
-        one_of("¥$€"),
-        take_while1(|c: char| c.is_ascii_digit() || c == ',' || c == '.'),
-    )
-        .parse(input)?;
-    let minor: i64 = digits
-        .chars()
-        .filter(|c| c.is_ascii_digit())
+fn parse_amount_str(input: &str) -> Option<i64> {
+    let rest = input.strip_prefix(|c: char| "¥$€".contains(c))?;
+    rest.chars()
+        .filter(char::is_ascii_digit)
         .collect::<String>()
         .parse()
-        .unwrap_or(0);
-    Ok((rest, minor))
+        .ok()
 }
 
 fn tokenize_line(s: &str) -> Vec<Token> {
@@ -92,23 +86,19 @@ fn tokenize_line(s: &str) -> Vec<Token> {
         return tokens;
     }
 
-    let mut result = Vec::new();
-
-    let mut iter = s.split_whitespace().rev();
-    for part in &mut iter {
-        if let Ok(("", amount)) = parse_amount_str(part) {
-            result.push(Token::Amount(amount));
-        } else {
-            let mut prefix: Vec<&str> = vec![part];
-            prefix.extend(iter);
-            prefix.reverse();
-            result.push(Token::Text(prefix.join(" ")));
-            break;
-        }
-    }
-
-    result.reverse();
-    result
+    let mut iter = s.split_whitespace().rev().peekable();
+    // collect amounts from the back of the string
+    let amounts = std::iter::from_fn(|| {
+        iter.next_if_map(|s| parse_amount_str(s).map(Token::Amount).ok_or(s))
+    })
+    .collect::<Vec<_>>();
+    // the remainder if any is the text description
+    let text = iter
+        .peek()
+        .is_some()
+        .then(|| Token::Text(iter.rev().collect::<Vec<_>>().join(" ")));
+    // build the result by chaining the text description (if any) and the amounts
+    text.into_iter().chain(amounts.into_iter().rev()).collect()
 }
 
 // ── Record type ───────────────────────────────────────────────────────────────
