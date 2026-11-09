@@ -163,8 +163,8 @@ mod tests {
         for record in &data.records {
             println!(
                 "Transaction: {:?}",
-                &record
-                    .as_transaction_builder(&iso::SGD)
+                record
+                    .as_transaction_builder(iso::SGD)
                     .unwrap()
                     .build()
                     .unwrap()

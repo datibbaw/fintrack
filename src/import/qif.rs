@@ -76,7 +76,7 @@ mod tests {
 
     fn build(record: &dyn AsTransactionBuilder) -> crate::models::Transaction {
         record
-            .as_transaction_builder(&iso::SGD)
+            .as_transaction_builder(iso::SGD)
             .unwrap()
             .account_id(1)
             .build()
