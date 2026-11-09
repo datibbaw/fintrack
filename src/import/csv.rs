@@ -1,10 +1,10 @@
 use std::{collections::HashMap, ops::Deref, path::Path};
 
 use crate::{
-    import::{parse_amount, specs, AsTransactionBuilder, ParseData},
+    import::{AsTransactionBuilder, ParseData, parse_amount, specs},
     models::TransactionBuilder,
 };
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use chrono::NaiveDate;
 use csv::StringRecord;
 use regex::Regex;

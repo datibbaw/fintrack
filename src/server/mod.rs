@@ -1,10 +1,10 @@
 use std::sync::{Arc, Mutex};
 
 use axum::{
-    http::{header, StatusCode, Uri},
+    Router,
+    http::{StatusCode, Uri, header},
     response::{IntoResponse, Response},
     routing::{get, put},
-    Router,
 };
 use rusqlite::Connection;
 use rust_embed::RustEmbed;

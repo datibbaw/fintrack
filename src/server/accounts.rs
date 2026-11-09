@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use axum::{extract::State, Json};
+use axum::{Json, extract::State};
 
 use crate::{db, models::Account};
 

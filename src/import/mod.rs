@@ -3,9 +3,9 @@ use crate::{
     models::{Account, Transaction, TransactionBuilder},
     money::HasCurrency,
 };
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use rusqlite::Connection;
-use rusty_money::{iso, Money};
+use rusty_money::{Money, iso};
 
 mod csv;
 mod pdf_citibank;
@@ -111,8 +111,8 @@ impl<'a> Importer<'a> {
                 .ok_or_else(|| anyhow!("Account not found: '{file_num}'"))?,
             (None, None) => {
                 anyhow::bail!(
-                        "Account number must be specified either as a command-line argument or in the file"
-                    );
+                    "Account number must be specified either as a command-line argument or in the file"
+                );
             }
         };
 
@@ -168,11 +168,7 @@ impl<'a> Importer<'a> {
             params.to_slice().as_slice(),
         )?;
 
-        if n == 1 {
-            Ok(Inserted)
-        } else {
-            Ok(Skipped)
-        }
+        if n == 1 { Ok(Inserted) } else { Ok(Skipped) }
     }
 }
 

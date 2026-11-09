@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use rust_embed::RustEmbed;
 use serde::de::DeserializeOwned;
 

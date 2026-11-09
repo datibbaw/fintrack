@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use axum::{
-    extract::{Query, State},
     Json,
+    extract::{Query, State},
 };
 use serde::{Deserialize, Serialize};
 use serde_rusqlite::from_rows;
@@ -183,11 +183,11 @@ fn query_transactions(
 
     if p.uncategorized == Some(true) {
         filter_clause.push_str(" AND t.category_id IS NULL");
-    } else if let Some(cat) = &p.category {
-        if !cat.is_empty() {
-            filter_clause.push_str(" AND c.name = ?");
-            vals.push(cat.clone());
-        }
+    } else if let Some(cat) = &p.category
+        && !cat.is_empty()
+    {
+        filter_clause.push_str(" AND c.name = ?");
+        vals.push(cat.clone());
     }
 
     // Count query (same filters, no pagination)
