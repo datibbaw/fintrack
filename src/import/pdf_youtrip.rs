@@ -8,7 +8,6 @@ use nom::{
     combinator::recognize,
 };
 use rusty_money::iso;
-use std::path::Path;
 
 use crate::{
     import::{AsTransactionBuilder, ParseData},
@@ -238,8 +237,7 @@ impl<I: Iterator<Item = Token>> Iterator for TransactionParser<I> {
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
-pub(super) fn parse<P: AsRef<Path>>(path: P) -> Result<ParseData> {
-    let text = pdf_extract::extract_text(path.as_ref())?;
+pub(super) fn parse(text: &str) -> Result<ParseData> {
     let tokens: Vec<Token> = text
         .lines()
         .filter(|l| !l.trim().is_empty())
@@ -434,7 +432,8 @@ mod tests {
     fn parse_actual_pdf() {
         // cargo test parse_actual_pdf -- --ignored --nocapture
         let path = env::var("PDF_FILE").expect("set PDF_FILE=/path/to/youtrip-statement.pdf");
-        let data = parse(path).unwrap();
+        let text = pdf_extract::extract_text(&path).unwrap();
+        let data = parse(&text).unwrap();
         for (i, record) in data.records.iter().enumerate() {
             let tx = record
                 .as_transaction_builder(iso::JPY)

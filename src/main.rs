@@ -3,8 +3,6 @@ use clap::{Parser, Subcommand};
 use rusty_money::iso;
 use std::io::{self, BufRead, Write};
 
-use crate::db::find_account;
-
 mod categorize;
 mod db;
 mod import;
@@ -40,12 +38,15 @@ enum Commands {
     #[command(subcommand)]
     Account(AccountCmd),
 
-    /// Import transactions from a CSV or QIF file
+    /// Import transactions from a CSV, QIF or PDF statement
     Import {
         file: String,
-        /// Account number; required for QIF and formats without embedded account number (e.g. Amex)
+        /// Account number; required for QIF and formats without embedded account number (e.g. Amex, YouTrip)
         #[arg(long)]
         account: Option<String>,
+        /// Importer to use; `auto` picks by file type and tries every matching parser
+        #[arg(long, value_enum, default_value_t = import::Format::Auto)]
+        format: import::Format,
     },
 
     /// Manage spending categories
@@ -242,27 +243,12 @@ fn main() -> Result<()> {
         },
 
         // ── Import ────────────────────────────────────────────────────────────
-        Commands::Import { file, account } => {
-            let ext = std::path::Path::new(&file)
-                .extension()
-                .and_then(|e| e.to_str())
-                .map(|e| e.to_ascii_lowercase());
-            let result = match ext.as_deref() {
-                Some("qif") => import::import_qif(&conn, &file, account)?,
-                Some("pdf") => {
-                    let account_num = account
-                        .ok_or_else(|| anyhow!("Account must be specified for PDF import"))?;
-                    let account = find_account(&conn, &account_num)?
-                        .ok_or_else(|| anyhow!("Account not found: '{account_num}'"))?;
-                    match account.bank.to_ascii_lowercase().as_str() {
-                        "youtrip" => {
-                            import::import_pdf_youtrip(&conn, &file, Some(account.number))?
-                        }
-                        _ => import::import_pdf_citibank(&conn, &file, Some(account.number))?,
-                    }
-                }
-                _ => import::import_csv(&conn, &file, account)?,
-            };
+        Commands::Import {
+            file,
+            account,
+            format,
+        } => {
+            let result = import::import_file(&conn, &file, format, account)?;
             println!(
                 "Account : {} ({})\nImported: {}  |  Skipped (duplicates): {}  |  Errors: {}",
                 result.account.name,

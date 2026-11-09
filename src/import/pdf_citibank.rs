@@ -1,4 +1,4 @@
-use std::{path::Path, str::Lines, sync::LazyLock};
+use std::{str::Lines, sync::LazyLock};
 
 use anyhow::Result;
 use chrono::{Datelike, NaiveDate};
@@ -119,8 +119,7 @@ fn parse_transaction(input: &str, statement_date: NaiveDate) -> Option<Transacti
     })
 }
 
-pub(super) fn parse<P: AsRef<Path>>(path: P) -> Result<ParseData> {
-    let text = pdf_extract::extract_text(path.as_ref())?;
+pub(super) fn parse(text: &str) -> Result<ParseData> {
     let mut lines = text.lines();
     let statement_date = skip_until_transaction_date(&mut lines)
         .ok_or_else(|| anyhow::anyhow!("could not find statement date"))?;
@@ -155,7 +154,7 @@ mod tests {
 
         println!("{text}");
 
-        let data = parse(path).unwrap();
+        let data = parse(&text).unwrap();
         println!(
             "account_number: {}",
             data.account_number.as_deref().unwrap_or("")
