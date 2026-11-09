@@ -97,37 +97,8 @@ impl<'a> Importer<'a> {
     fn import_data(&self, data: ParseData) -> Result<ImportResult> {
         use InsertResult::*;
 
-        let account = match (&self.account_number, &data.account_number) {
-            (Some(num), Some(file_num)) if *num != *file_num => {
-                anyhow::bail!(
-                    "account number mismatch: file has '{}', argument is '{}'",
-                    file_num,
-                    num
-                );
-            }
-            (Some(num), _) => find_account(self.conn, num)?
-                .ok_or_else(|| anyhow!("Account not found: '{num}'"))?,
-            (None, Some(file_num)) => find_account(self.conn, file_num)?
-                .ok_or_else(|| anyhow!("Account not found: '{file_num}'"))?,
-            (None, None) => {
-                anyhow::bail!(
-                    "Account number must be specified either as a command-line argument or in the file"
-                );
-            }
-        };
-
-        let currency = account.currency();
-
-        if let Some(file_currency) = &data.currency {
-            if currency.iso_alpha_code != file_currency {
-                anyhow::bail!(
-                    "currency mismatch: file has '{}', but account '{}' has currency '{}'",
-                    file_currency,
-                    account.name,
-                    currency.iso_alpha_code
-                );
-            }
-        }
+        let account = self.resolve_account(data.account_number)?;
+        let currency = reconcile_currency(&account, data.currency.as_deref())?;
 
         let mut imported: usize = 0;
         let mut skipped: usize = 0;
@@ -157,6 +128,25 @@ impl<'a> Importer<'a> {
         })
     }
 
+    fn resolve_account(&self, account_number: Option<String>) -> Result<Account> {
+        match (&self.account_number, &account_number) {
+            (Some(given_num), Some(parsed_num)) if *given_num != *parsed_num => {
+                anyhow::bail!(
+                    "account number mismatch: file has '{parsed_num}', argument is '{given_num}'",
+                );
+            }
+            (Some(given_num), _) => find_account(self.conn, given_num)?
+                .ok_or_else(|| anyhow!("Account not found: '{given_num}'")),
+            (None, Some(parsed_num)) => find_account(self.conn, parsed_num)?
+                .ok_or_else(|| anyhow!("Account not found: '{parsed_num}'")),
+            (None, None) => {
+                anyhow::bail!(
+                    "Account number must be specified either as a command-line argument or in the file"
+                );
+            }
+        }
+    }
+
     fn insert(&self, t: Transaction) -> Result<InsertResult> {
         use InsertResult::*;
 
@@ -169,6 +159,24 @@ impl<'a> Importer<'a> {
         )?;
 
         if n == 1 { Ok(Inserted) } else { Ok(Skipped) }
+    }
+}
+
+fn reconcile_currency(
+    account: &Account,
+    found_currency: Option<&str>,
+) -> Result<&'static iso::Currency> {
+    let currency = account.currency();
+
+    match found_currency {
+        Some(c) if c != currency.iso_alpha_code => {
+            anyhow::bail!(
+                "currency mismatch: file has '{c}', but account '{}' has currency '{}'",
+                account.name,
+                currency.iso_alpha_code
+            );
+        }
+        _ => Ok(currency),
     }
 }
 
