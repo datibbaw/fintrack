@@ -270,7 +270,7 @@ mod tests {
 
     fn build(record: &YouTripRecord) -> crate::models::Transaction {
         record
-            .as_transaction_builder(&iso::SGD)
+            .as_transaction_builder(iso::SGD)
             .unwrap()
             .account_id(1)
             .build()
@@ -437,7 +437,7 @@ mod tests {
         let data = parse(path).unwrap();
         for (i, record) in data.records.iter().enumerate() {
             let tx = record
-                .as_transaction_builder(&iso::JPY)
+                .as_transaction_builder(iso::JPY)
                 .unwrap()
                 .account_id(1)
                 .build()
