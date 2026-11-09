@@ -3,7 +3,7 @@ use std::{path::Path, str::Lines, sync::LazyLock};
 use anyhow::Result;
 use chrono::{Datelike, NaiveDate};
 use regex::Regex;
-use rusty_money::{iso, Money};
+use rusty_money::{Money, iso};
 
 use crate::{
     import::{AsTransactionBuilder, ParseData},

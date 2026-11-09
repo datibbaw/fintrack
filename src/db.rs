@@ -1,6 +1,6 @@
 use anyhow::Result;
-use rusqlite::{functions::FunctionFlags, params, Connection};
-use rusqlite_migration::{Migrations, M};
+use rusqlite::{Connection, functions::FunctionFlags, params};
+use rusqlite_migration::{M, Migrations};
 use rusty_money::iso::Currency;
 use serde_rusqlite::{from_row, from_rows};
 use sha2::{Digest, Sha256};

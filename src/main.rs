@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use clap::{Parser, Subcommand};
 use rusty_money::iso;
 use std::io::{self, BufRead, Write};
@@ -198,7 +198,9 @@ fn main() -> Result<()> {
             AccountCmd::List => {
                 let accounts = db::list_accounts(&conn)?;
                 if accounts.is_empty() {
-                    println!("No accounts yet. Add one with:\n  fintrack account add --name <name> --number <number>");
+                    println!(
+                        "No accounts yet. Add one with:\n  fintrack account add --name <name> --number <number>"
+                    );
                 } else {
                     let table = tabled::Table::new(&accounts);
                     println!("{table}");
@@ -307,46 +309,46 @@ fn main() -> Result<()> {
         },
 
         // ── Rules ─────────────────────────────────────────────────────────────
-        Commands::Rule(cmd) => {
-            match cmd {
-                RuleCmd::List { category } => {
-                    let rules = db::list_rules(&conn, category.as_deref())?;
-                    if rules.is_empty() {
-                        println!("No rules found.");
-                    } else {
-                        let table = tabled::Table::new(&rules);
-                        println!("{table}");
-                    }
-                }
-                RuleCmd::Add {
-                    category,
-                    field,
-                    pattern,
-                    priority,
-                } => {
-                    const VALID_FIELDS: &[&str] =
-                        &["description", "ref1", "ref2", "ref3", "code", "any"];
-                    if !VALID_FIELDS.contains(&field.as_str()) {
-                        anyhow::bail!(
-                            "Invalid field '{}'. Must be one of: {}",
-                            field,
-                            VALID_FIELDS.join(", ")
-                        );
-                    }
-                    regex::Regex::new(&pattern)
-                        .map_err(|e| anyhow!("Invalid regex pattern '{pattern}': {e}"))?;
-
-                    let cat = db::find_category(&conn, &category)?
-                        .ok_or_else(|| anyhow!("Category not found: '{category}'"))?;
-                    let id = db::add_rule(&conn, cat.id, &field, &pattern, priority)?;
-                    println!("Added rule #{id}: [{field}] =~ /{pattern}/ → {category} (priority {priority})");
-                }
-                RuleCmd::Remove { id } => {
-                    db::remove_rule(&conn, id)?;
-                    println!("Removed rule #{id}.");
+        Commands::Rule(cmd) => match cmd {
+            RuleCmd::List { category } => {
+                let rules = db::list_rules(&conn, category.as_deref())?;
+                if rules.is_empty() {
+                    println!("No rules found.");
+                } else {
+                    let table = tabled::Table::new(&rules);
+                    println!("{table}");
                 }
             }
-        }
+            RuleCmd::Add {
+                category,
+                field,
+                pattern,
+                priority,
+            } => {
+                const VALID_FIELDS: &[&str] =
+                    &["description", "ref1", "ref2", "ref3", "code", "any"];
+                if !VALID_FIELDS.contains(&field.as_str()) {
+                    anyhow::bail!(
+                        "Invalid field '{}'. Must be one of: {}",
+                        field,
+                        VALID_FIELDS.join(", ")
+                    );
+                }
+                regex::Regex::new(&pattern)
+                    .map_err(|e| anyhow!("Invalid regex pattern '{pattern}': {e}"))?;
+
+                let cat = db::find_category(&conn, &category)?
+                    .ok_or_else(|| anyhow!("Category not found: '{category}'"))?;
+                let id = db::add_rule(&conn, cat.id, &field, &pattern, priority)?;
+                println!(
+                    "Added rule #{id}: [{field}] =~ /{pattern}/ → {category} (priority {priority})"
+                );
+            }
+            RuleCmd::Remove { id } => {
+                db::remove_rule(&conn, id)?;
+                println!("Removed rule #{id}.");
+            }
+        },
 
         // ── Transactions ──────────────────────────────────────────────────────
         Commands::Transaction(cmd) => match cmd {

@@ -1,11 +1,11 @@
 use anyhow::Result;
 use chrono::NaiveDate;
 use nom::{
+    IResult, Parser,
     branch::alt,
-    bytes::complete::{tag, take_while1, take_while_m_n},
+    bytes::complete::{tag, take_while_m_n, take_while1},
     character::complete::{one_of, space1},
     combinator::recognize,
-    IResult, Parser,
 };
 use rusty_money::iso;
 use std::path::Path;

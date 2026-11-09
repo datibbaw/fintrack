@@ -1,5 +1,5 @@
 use crate::{db, models::Account, money::CurrencyCode};
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use rusqlite::Connection;
 use rusty_money::iso;
 

@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use axum::{
+    Json,
     extract::{Path, State},
     http::StatusCode,
-    Json,
 };
 use serde::{Deserialize, Serialize};
 use serde_rusqlite::from_rows;
