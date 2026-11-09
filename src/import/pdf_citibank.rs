@@ -13,6 +13,9 @@ use crate::{
 static STATEMENT_DATE_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"Statement Date (\w{5,} \d{1,2}, \d{4})$").unwrap());
 
+static ACCOUNT_NUMBER_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(\d{4} \d{4} \d{4} \d{4}) Payment Due Date:").unwrap());
+
 /// Transaction line pattern
 ///
 /// Captures the day (1), month (2), description (3), and debit (4) or credit (5).
@@ -73,6 +76,14 @@ fn skip_until_transaction_date(iter: &mut Lines) -> Option<NaiveDate> {
     })
 }
 
+fn skip_until_account_number(iter: &mut Lines) -> Option<String> {
+    iter.find_map(|line| {
+        ACCOUNT_NUMBER_REGEX
+            .captures(line)
+            .and_then(|caps| Some(caps.get(1)?.as_str().to_string()))
+    })
+}
+
 fn full_transaction_date(day: u32, month: u32, statement_date: NaiveDate) -> Option<NaiveDate> {
     // transaction dates always come before statement dates
     let year = if month > statement_date.month() {
@@ -112,8 +123,13 @@ pub(super) fn parse<P: AsRef<Path>>(path: P) -> Result<ParseData> {
     let text = pdf_extract::extract_text(path.as_ref())?;
     let mut lines = text.lines();
     let statement_date = skip_until_transaction_date(&mut lines)
-        .ok_or_else(|| anyhow::anyhow!("could not find statement date in Citibank PDF"))?;
-    let mut data = ParseData::default();
+        .ok_or_else(|| anyhow::anyhow!("could not find statement date"))?;
+    let account_number = skip_until_account_number(&mut lines)
+        .ok_or_else(|| anyhow::anyhow!("could not find account number"))?;
+    let mut data = ParseData {
+        account_number: Some(account_number),
+        ..Default::default()
+    };
 
     for line in lines {
         if let Some(transaction) = parse_transaction(line, statement_date) {
@@ -134,24 +150,25 @@ mod tests {
     #[ignore]
     fn pdf_contents() {
         let path = env::var("PDF_FILE").expect("set PDF_FILE=/path/to/citibank-statement.pdf");
-        let contents: Vec<u8> = std::fs::read(path).unwrap();
+        let contents: Vec<u8> = std::fs::read(&path).unwrap();
         let text = pdf_extract::extract_text_from_mem(&contents).unwrap();
 
         println!("{text}");
-        let mut iter = text.lines();
 
-        let statement_date = skip_until_transaction_date(&mut iter).unwrap();
-        println!("statement_date: {statement_date:?}");
-
-        iter.filter_map(|line| parse_transaction(line, statement_date))
-            .for_each(|t| {
-                println!(
-                    "Transaction: {:?}",
-                    &t.as_transaction_builder(&iso::SGD)
-                        .unwrap()
-                        .build()
-                        .unwrap()
-                );
-            });
+        let data = parse(path).unwrap();
+        println!(
+            "account_number: {}",
+            data.account_number.as_deref().unwrap_or("")
+        );
+        for record in &data.records {
+            println!(
+                "Transaction: {:?}",
+                &record
+                    .as_transaction_builder(&iso::SGD)
+                    .unwrap()
+                    .build()
+                    .unwrap()
+            );
+        }
     }
 }
