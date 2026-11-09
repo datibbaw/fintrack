@@ -3,9 +3,10 @@ use crate::{
     models::{Account, Transaction, TransactionBuilder},
     money::HasCurrency,
 };
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use rusqlite::Connection;
 use rusty_money::{Money, iso};
+use std::path::Path;
 
 mod csv;
 mod pdf_citibank;
@@ -35,41 +36,81 @@ pub(crate) trait AsTransactionBuilder {
     ) -> Result<TransactionBuilder>;
 }
 
-/// Imports transactions from a CSV file using the ReaderSpec.
-pub fn import_csv<P: AsRef<std::path::Path>>(
+/// Selects which parser reads an import file.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, clap::ValueEnum)]
+pub enum Format {
+    /// Choose by file type only: `.qif` → QIF, `.pdf` → first PDF parser that
+    /// recognises the statement, anything else → CSV (spec auto-detection).
+    #[default]
+    Auto,
+    Csv,
+    Qif,
+    PdfCitibank,
+    PdfYoutrip,
+}
+
+type PdfParser = fn(&str) -> Result<ParseData>;
+
+/// PDF parsers tried in order by [`Format::Auto`]. Stricter parsers (those that
+/// fail fast on unrecognised statements) should come first.
+const PDF_PARSERS: &[(&str, PdfParser)] = &[
+    ("citibank", pdf_citibank::parse),
+    ("youtrip", pdf_youtrip::parse),
+];
+
+/// Parses `path` with the given format and imports the transactions.
+pub fn import_file<P: AsRef<Path>>(
     conn: &Connection,
     path: P,
+    format: Format,
     account_number: Option<String>,
 ) -> Result<ImportResult> {
-    let data = csv::parse(path)?;
+    let data = parse_file(path.as_ref(), format)?;
     Importer::new(conn, account_number).import_data(data)
 }
 
-pub fn import_pdf_citibank<P: AsRef<std::path::Path>>(
-    conn: &Connection,
-    path: P,
-    account_number: Option<String>,
-) -> Result<ImportResult> {
-    let data = pdf_citibank::parse(path)?;
-    Importer::new(conn, account_number).import_data(data)
+fn parse_file(path: &Path, format: Format) -> Result<ParseData> {
+    match format {
+        Format::Auto => parse_auto(path),
+        Format::Csv => csv::parse(path),
+        Format::Qif => qif::parse(path),
+        Format::PdfCitibank => pdf_citibank::parse(&pdf_text(path)?),
+        Format::PdfYoutrip => pdf_youtrip::parse(&pdf_text(path)?),
+    }
 }
 
-pub fn import_pdf_youtrip<P: AsRef<std::path::Path>>(
-    conn: &Connection,
-    path: P,
-    account_number: Option<String>,
-) -> Result<ImportResult> {
-    let data = pdf_youtrip::parse(path)?;
-    Importer::new(conn, account_number).import_data(data)
+fn parse_auto(path: &Path) -> Result<ParseData> {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase());
+    match ext.as_deref() {
+        Some("qif") => qif::parse(path),
+        Some("pdf") => parse_pdf_auto(&pdf_text(path)?),
+        _ => csv::parse(path),
+    }
 }
 
-pub fn import_qif<P: AsRef<std::path::Path>>(
-    conn: &Connection,
-    path: P,
-    account_number: Option<String>,
-) -> Result<ImportResult> {
-    let data = qif::parse(path)?;
-    Importer::new(conn, account_number).import_data(data)
+fn pdf_text(path: &Path) -> Result<String> {
+    pdf_extract::extract_text(path)
+        .with_context(|| format!("cannot extract text from PDF: {}", path.display()))
+}
+
+/// Tries each PDF parser in turn; the first one that succeeds and yields at
+/// least one transaction wins.
+fn parse_pdf_auto(text: &str) -> Result<ParseData> {
+    let mut failures = Vec::new();
+    for (name, parse) in PDF_PARSERS {
+        match parse(text) {
+            Ok(data) if !data.records.is_empty() => return Ok(data),
+            Ok(_) => failures.push(format!("{name}: no transactions found")),
+            Err(e) => failures.push(format!("{name}: {e:#}")),
+        }
+    }
+    bail!(
+        "no PDF importer recognised the file ({})",
+        failures.join("; ")
+    )
 }
 
 fn parse_amount(s: &str, currency: &iso::Currency) -> Result<Option<i64>> {
@@ -199,7 +240,7 @@ mod tests {
     }
 
     fn csv(conn: &Connection, path: &str, number: &str) -> Result<ImportResult> {
-        import_csv(conn, path, Some(number.to_string()))
+        import_file(conn, path, Format::Csv, Some(number.to_string()))
     }
 
     // ── 9-column savings/current ──────────────────────────────────────────────
@@ -345,7 +386,7 @@ mod tests {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/qif_ccard.qif");
         create_account(&conn, "541", "My Card").unwrap();
 
-        let result = import_qif(&conn, path, Some("541".to_string())).unwrap();
+        let result = import_file(&conn, path, Format::Qif, Some("541".to_string())).unwrap();
 
         assert_eq!(result.imported, 4);
         assert_eq!(result.skipped, 0);
@@ -357,7 +398,7 @@ mod tests {
         let (_dir, conn) = tmp_conn();
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/qif_ccard.qif");
         create_account(&conn, "541", "My Card").unwrap();
-        import_qif(&conn, path, Some("541".to_string())).unwrap();
+        import_file(&conn, path, Format::Qif, Some("541".to_string())).unwrap();
 
         let (debit, credit, description): (Option<i64>, Option<i64>, String) = conn
             .query_row(
@@ -443,7 +484,8 @@ mod tests {
         let (_dir, conn) = tmp_conn();
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/dbs_9col.csv");
         // file has account number 000-11111-1; pass a different number
-        let err = import_csv(&conn, path, Some("wrong-number".to_string())).unwrap_err();
+        let err =
+            import_file(&conn, path, Format::Csv, Some("wrong-number".to_string())).unwrap_err();
         assert!(err.to_string().contains("account number mismatch"), "{err}");
     }
 
@@ -453,8 +495,39 @@ mod tests {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/dbs_9col.csv");
         // file has currency SGD; account has USD
         create_account_with_currency(&conn, "000-11111-1", "Test", "USD").unwrap();
-        let err = import_csv(&conn, path, Some("000-11111-1".to_string())).unwrap_err();
+        let err =
+            import_file(&conn, path, Format::Csv, Some("000-11111-1".to_string())).unwrap_err();
         assert!(err.to_string().contains("currency mismatch"), "{err}");
+    }
+
+    // ── PDF auto-detection ────────────────────────────────────────────────────
+
+    const CITIBANK_TEXT: &str = "\
+Statement Date March 15, 2026
+1234 5678 9012 3456 Payment Due Date: April 5, 2026
+02 MAR COFFEE SHOP SINGAPORE 5.50
+10 MAR PAYMENT RECEIVED (100.00)
+";
+
+    #[test]
+    fn pdf_auto_picks_first_matching_parser() {
+        let data = parse_pdf_auto(CITIBANK_TEXT).unwrap();
+        assert_eq!(data.account_number.as_deref(), Some("1234 5678 9012 3456"));
+        assert_eq!(data.records.len(), 2);
+    }
+
+    #[test]
+    fn pdf_auto_reports_every_parser_when_none_match() {
+        let Err(err) = parse_pdf_auto("nothing recognisable here") else {
+            panic!("expected no parser to match");
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("no PDF importer recognised"), "{msg}");
+        assert!(
+            msg.contains("citibank: could not find statement date"),
+            "{msg}"
+        );
+        assert!(msg.contains("youtrip: no transactions found"), "{msg}");
     }
 
     #[test]
@@ -463,12 +536,12 @@ mod tests {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/qif_ccard.qif");
         create_account(&conn, "541", "My Card").unwrap();
 
-        let first = import_qif(&conn, path, Some("541".to_string())).unwrap();
+        let first = import_file(&conn, path, Format::Qif, Some("541".to_string())).unwrap();
         assert_eq!(first.imported, 4);
         assert_eq!(first.skipped, 0);
         assert_eq!(first.errored, 0);
 
-        let second = import_qif(&conn, path, Some("541".to_string())).unwrap();
+        let second = import_file(&conn, path, Format::Qif, Some("541".to_string())).unwrap();
         assert_eq!(second.imported, 0);
         assert_eq!(second.skipped, 4);
         assert_eq!(second.errored, 0);
