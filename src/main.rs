@@ -3,6 +3,8 @@ use clap::{Parser, Subcommand};
 use rusty_money::iso;
 use std::io::{self, BufRead, Write};
 
+use crate::models::{Condition, Criteria, Field, Matcher, Value};
+
 mod categorize;
 mod db;
 mod import;
@@ -126,17 +128,39 @@ enum RuleCmd {
     /// Add a categorization rule
     ///
     /// Examples:
-    ///   fintrack rule add "Food" --pattern "(?i)grab|foodpanda|mcdonalds"
+    ///   fintrack rule add "Food" --field description --pattern "(?i)grab|foodpanda|mcdonalds"
     ///   fintrack rule add "Utilities" --field ref2 --pattern "(?i)sp group|singapore power" --priority 10
+    ///   fintrack rule add "Food" --criteria '{"and":[{"field":"code","equals":"POS"}],"or":[{"field":"description","includes":"GRAB"},{"field":"description","includes":"KOPI"}]}'
     Add {
         /// Category to assign when the rule matches
         category: String,
-        /// Field to match against: description | ref1 | ref2 | ref3 | code | any
-        #[arg(long, default_value = "any")]
-        field: String,
-        /// Regex pattern (case-insensitive flag: add (?i) prefix)
+        /// Field to match against: description | ref1 | ref2 | ref3 | code | amount
+        ///
+        /// To match several fields, use `--criteria` with an `or` group.
+        ///
+        /// `amount` matches an exact integer in minor units (e.g. cents):
+        /// negative matches debit, positive matches credit (`-1250` = debit of 12.50).
+        #[arg(long, requires = "pattern", conflicts_with = "criteria")]
+        field: Option<String>,
+        /// Regex pattern (case-insensitive flag: add (?i) prefix), or an
+        /// integer for `amount`
+        #[arg(
+            long,
+            allow_hyphen_values = true,
+            requires = "field",
+            required_unless_present = "criteria",
+            conflicts_with = "criteria"
+        )]
+        pattern: Option<String>,
+        /// Full JSON criteria: {"and": [...], "or": [...]}, each condition being
+        /// {"field": <field>, "equals"|"includes"|"matches": <value>}.
+        /// Every `and` condition must match, plus at least one `or` (if any).
+        /// `amount` only supports `equals` with an integer value.
         #[arg(long)]
-        pattern: String,
+        criteria: Option<String>,
+        /// Only apply the rule to transactions of this account (account number)
+        #[arg(long)]
+        account: Option<String>,
         /// Tie-breaking priority — higher value wins when multiple rules match
         #[arg(long, default_value_t = 0)]
         priority: i64,
@@ -174,7 +198,7 @@ enum ReportCmd {
         from: Option<String>,
         #[arg(long)]
         to: Option<String>,
-        /// Filter to a specific category
+        /// Filter to a category (includes its sub-categories)
         #[arg(long)]
         category: Option<String>,
         /// Account number
@@ -309,26 +333,50 @@ fn main() -> Result<()> {
                 category,
                 field,
                 pattern,
+                criteria,
+                account,
                 priority,
             } => {
-                const VALID_FIELDS: &[&str] =
-                    &["description", "ref1", "ref2", "ref3", "code", "any"];
-                if !VALID_FIELDS.contains(&field.as_str()) {
-                    anyhow::bail!(
-                        "Invalid field '{}'. Must be one of: {}",
-                        field,
-                        VALID_FIELDS.join(", ")
-                    );
-                }
-                regex::Regex::new(&pattern)
-                    .map_err(|e| anyhow!("Invalid regex pattern '{pattern}': {e}"))?;
+                let criteria = match (criteria, field, pattern) {
+                    (Some(json), _, _) => serde_json::from_str::<Criteria>(&json)
+                        .map_err(|e| anyhow!("Invalid criteria: {e}"))?,
+                    (None, Some(field), Some(pattern)) => {
+                        let field: Field = field.parse()?;
+                        // integer fields match exactly; everything else is a regex.
+                        let matcher =
+                            if field.is_integer() {
+                                Matcher::Equals(Value::Integer(pattern.parse().map_err(|_| {
+                                    anyhow!("`{field}` expects an integer, got '{pattern}'")
+                                })?))
+                            } else {
+                                Matcher::Matches(regex::Regex::new(&pattern).map_err(|e| {
+                                    anyhow!("Invalid regex pattern '{pattern}': {e}")
+                                })?)
+                            };
+                        Criteria::single(Condition::new(field, matcher).map_err(|e| anyhow!(e))?)
+                    }
+                    _ => unreachable!("clap requires --field/--pattern or --criteria"),
+                };
 
                 let cat = db::find_category(&conn, &category)?
                     .ok_or_else(|| anyhow!("Category not found: '{category}'"))?;
-                let id = db::add_rule(&conn, cat.id, &field, &pattern, priority)?;
-                println!(
-                    "Added rule #{id}: [{field}] =~ /{pattern}/ → {category} (priority {priority})"
-                );
+                let account = account
+                    .map(|a| {
+                        db::find_account(&conn, &a)?
+                            .ok_or_else(|| anyhow!("Account not found: '{a}'"))
+                    })
+                    .transpose()?;
+                let id = db::add_rule(
+                    &conn,
+                    cat.id,
+                    account.as_ref().map(|a| a.id),
+                    &criteria,
+                    priority,
+                )?;
+                let scope = account
+                    .map(|a| format!(" [account {}]", a.number))
+                    .unwrap_or_default();
+                println!("Added rule #{id}: {criteria}{scope} → {category} (priority {priority})");
             }
             RuleCmd::Remove { id } => {
                 db::remove_rule(&conn, id)?;

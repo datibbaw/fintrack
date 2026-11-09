@@ -11,7 +11,7 @@ use serde_rusqlite::from_rows;
 
 use crate::{
     db,
-    models::{Field, Rule},
+    models::{Criteria, Rule},
 };
 
 use super::{ApiError, Db};
@@ -30,8 +30,8 @@ pub struct CategoryDto {
 pub struct RuleDto {
     pub id: i64,
     pub category_id: i64,
-    pub field: Field,
-    pub pattern: String,
+    pub account_id: Option<i64>,
+    pub criteria: Criteria,
     pub priority: i64,
 }
 
@@ -40,8 +40,8 @@ impl From<Rule> for RuleDto {
         RuleDto {
             id: rule.id,
             category_id: rule.category_id,
-            field: rule.field,
-            pattern: rule.pattern.as_str().to_string(),
+            account_id: rule.account_id,
+            criteria: rule.criteria,
             priority: rule.priority,
         }
     }

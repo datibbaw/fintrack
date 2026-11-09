@@ -122,10 +122,10 @@ accounts      (id, name, number, bank, currency)
 categories    (id, name, parent_id → categories)
 transactions  (id, account_id, date, code, description, ref1, ref2, ref3,
                status, debit, credit, hash UNIQUE, category_id → categories)
-rules         (id, category_id, field, pattern, priority)
+rules         (id, category_id, account_id → accounts NULL, criteria JSON, priority)
 ```
 
-`field` one of: `description`, `ref1`, `ref2`, `ref3`, `code`, `any`.
+`account_id` set → rule only applies to that account's transactions; rule deleted with its account (FK cascade). `criteria` = `{"and": [cond...], "or": [cond...]}` — all `and` must match, plus ≥1 `or` (if present). Cond = `{"field": F, "equals"|"includes"|"matches": V}`. Text fields: `description`, `ref1`, `ref2`, `ref3`, `code` (string `equals`, `includes`, regex `matches`). Integer field: `amount` (signed minor units, debit negative) — only `equals` with JSON integer. No conditions → never matches. Match several fields with an `or` group (no `any` field). Parsed/validated by `models::rule::Criteria`.
 
 ## Things not yet built (potential next steps)
 

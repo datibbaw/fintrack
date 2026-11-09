@@ -5,13 +5,64 @@ import Prism from 'prismjs'
 import 'prismjs/components/prism-regex'
 import { api } from '../api'
 import { activeTab } from '../store'
-import type { Category, Rule } from '../types'
+import type { Category, Condition, Criteria, Rule } from '../types'
 
 // ── Regex syntax highlight ─────────────────────────────────────────────────────
 
 function RegexHighlight({ pattern }: { pattern: string }) {
   const html = Prism.highlight(pattern, Prism.languages['regex'], 'regex')
   return <code class="regex-hl" dangerouslySetInnerHTML={{ __html: html }} />
+}
+
+// ── Rule criteria rendering ────────────────────────────────────────────────────
+
+function ConditionView({ cond }: { cond: Condition }) {
+  return (
+    <span class="rule-cond">
+      <span class="mono rule-field">{cond.field}</span>{' '}
+      {'equals' in cond ? (
+        <><span class="rule-op">=</span> <code class="mono">{typeof cond.equals === 'number' ? cond.equals : `"${cond.equals}"`}</code></>
+      ) : 'includes' in cond ? (
+        <><span class="rule-op">contains</span> <code class="mono">"{cond.includes}"</code></>
+      ) : (
+        <><span class="rule-op">=~</span> <RegexHighlight pattern={cond.matches} /></>
+      )}
+    </span>
+  )
+}
+
+function ConditionGroup({ label, conds }: { label: string; conds: Condition[] }) {
+  return (
+    <div class="rule-group">
+      <span class="rule-group-label">{label}</span>
+      {conds.map((c, i) => <ConditionView key={i} cond={c} />)}
+    </div>
+  )
+}
+
+function CriteriaView({ criteria }: { criteria: Criteria }) {
+  const and = criteria.and ?? []
+  const or  = criteria.or ?? []
+  return (
+    <div class="rule-criteria">
+      {and.length > 0 && <ConditionGroup label="all of" conds={and} />}
+      {or.length > 0 && <ConditionGroup label="any of" conds={or} />}
+    </div>
+  )
+}
+
+function RuleCriteria({ rule }: { rule: Rule }) {
+  return (
+    <>
+      {rule.account_id !== null && (
+        <div class="rule-group">
+          <span class="rule-group-label">account</span>
+          <span class="mono">#{rule.account_id}</span>
+        </div>
+      )}
+      <CriteriaView criteria={rule.criteria} />
+    </>
+  )
 }
 
 type EditMode =
@@ -216,16 +267,14 @@ export function Categories() {
           <table class="data-table cat-rules-table">
             <thead>
               <tr>
-                <th>Field</th>
-                <th>Pattern</th>
+                <th>Criteria</th>
                 <th class="col-number">Priority</th>
               </tr>
             </thead>
             <tbody>
               {rules.map(rule => (
                 <tr key={rule.id}>
-                  <td class="mono">{rule.field}</td>
-                  <td><RegexHighlight pattern={rule.pattern} /></td>
+                  <td><RuleCriteria rule={rule} /></td>
                   <td class="mono col-number">{rule.priority}</td>
                 </tr>
               ))}
